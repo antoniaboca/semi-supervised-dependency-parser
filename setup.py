@@ -6,7 +6,7 @@ setup(name='dependency-parsers',
       author='Antonia Boca',
       url='https://github.com/antoniaboca/semi-supervised-dependency-parser',
       install_requires=[
-          pyconll,
+          pyconll, torch, torchvision, torchaudio
       ],
       packages=find_packages(),
       )
