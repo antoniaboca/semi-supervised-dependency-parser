@@ -13,9 +13,7 @@ def plot_zipf(file):
     data_processor = DataProcessor(file)
     vocab = data_processor.vocab
     words = data_processor.words
-    index_to_token = vocab.get_index_to_token_vocabulary(namespace='words')
-    tuples = [(key, value) for key, value in index_to_token.items()]
-    tuples.sort()
+    tuples = data_processor.index_to_token_tuples
 
     ys = [words[value] for _, value in tuples if value in words]
     xs = [key for key, value in tuples if value in words]
