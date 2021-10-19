@@ -61,3 +61,4 @@ class DataProcessor:
         
         self.word_to_index = self.vocab.get_token_to_index_vocabulary(namespace='words')
         self.pos_to_index = self.vocab.get_token_to_index_vocabulary(namespace='pos_tags')
+
