@@ -1,4 +1,5 @@
 import pickle
+from tqdm import tqdm
 
 import torch
 import torch.nn as nn
@@ -30,7 +31,7 @@ train_dataloader = DataLoader(embedded_set, batch_size=BATCH_SIZE, shuffle=False
 
 print('Initialize the model...')
 model = LSTMTagger(EMBEDDING_DIM, HIDDEN_DIM, NUM_LAYERS, DROPOUT, TAGSET_SIZE)
-loss_function = nn.NLLLoss(ignore_index=0)
+loss_function = nn.CrossEntropyLoss(ignore_index=0)
 optimizer = optim.Adam(model.parameters(), lr=0.05)
 
 print('Start training the model...')
@@ -39,32 +40,32 @@ loss_fn = []
 for epoch in range(NUM_EPOCH):
     loss_value = 0
     instances = 0
-    gen = iter(train_dataloader)
-    while True:
-        try:
-            train_batch = next(gen)
-            targets, _ = pad_packed_sequence(train_batch['tags'], batch_first=True)
-            #print('Model batch {};'.format(instances))
+    num_correct = 0
+    total = 0
+    for train_batch in tqdm(train_dataloader):
+        targets, _ = pad_packed_sequence(train_batch['tags'], batch_first=True)
+        #print('Model batch {};'.format(instances))
 
-            model.zero_grad()
-            tag_scores = model(train_batch)
-            
-            #import ipdb; ipdb.set_trace()
-            total_loss = 0.0
-            for idx in range(len(tag_scores)):
-                total_loss += loss_function(tag_scores[idx], targets[idx])
-            
-            loss_value += total_loss.item()
-            loss_fn.append(total_loss.item())
-            instances += 1
+        model.zero_grad()
+        tag_scores = model(train_batch)
+        batch_size, sent_len, num_tags = tag_scores.shape
+        total_loss = loss_function(
+            tag_scores.reshape(batch_size * sent_len, num_tags),
+            targets.reshape(batch_size * sent_len)
+        )
+        tags = tag_scores.argmax(-1)
+        num_correct += torch.count_nonzero((tags == targets) * (targets != 0))
+        total += torch.count_nonzero(targets)
 
-            total_loss.backward()
-            optimizer.step()
+        loss_value += total_loss.item()
+        loss_fn.append(total_loss.item())
+        instances += 1
 
-        except StopIteration:
-            break
+        total_loss.backward()
+        optimizer.step()
     
     print('Average loss value for epoch {}: {}'.format(epoch, loss_value/instances))
+    print('Training accuracy for epoch {}:  {}'.format(epoch, num_correct/total))
 
 with torch.no_grad():
     print('AFTER TRAINING')

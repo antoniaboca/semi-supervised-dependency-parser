@@ -25,6 +25,5 @@ class LSTMTagger(nn.Module):
         lstm_out, _ = self.lstm(embedding.float())
         lstm_out, _ = pad_packed_sequence(lstm_out, batch_first=True)
         
-        tag_space = self.hidden2tag(lstm_out)
-        tag_scores = F.log_softmax(tag_space, dim=1)
+        tag_scores = self.hidden2tag(lstm_out)
         return tag_scores
