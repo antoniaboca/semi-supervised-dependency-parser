@@ -2,9 +2,7 @@ import pyconll
 import pyconll.util
 from allennlp.data.vocabulary import Vocabulary
 
-UD_ENGLISH_GUM = 'dependency-parsers/en_gum-ud-train.conllu'
-
-class DataProcessor:
+class DataVocabulary:
     def __init__(self, file, max_size=None):
         self.file = file
         self.words = {}
@@ -53,12 +51,14 @@ class DataProcessor:
 
 
         self.vocab = Vocabulary(counter={'words': self.words, 'pos_tags': self.pos_tags, 'dep_rel': self.dep_rel})
-        self.index_to_token = self.vocab.get_index_to_token_vocabulary(namespace='words')
+        self.index_to_word = self.vocab.get_index_to_token_vocabulary(namespace='words')
         self.index_to_pos = self.vocab.get_index_to_token_vocabulary(namespace='pos_tags')
-        
+        self.index_to_dep = self.vocab.get_index_to_token_vocabulary(namespace='dep_rel')
+
         self.index_to_token_tuples = [(key, value) for key, value in self.index_to_token.items()]
         self.index_to_token_tuples.sort()
         
         self.word_to_index = self.vocab.get_token_to_index_vocabulary(namespace='words')
         self.pos_to_index = self.vocab.get_token_to_index_vocabulary(namespace='pos_tags')
+        self.dep_to_index = self.vocab.get_token_to_index_vocabulary(namespace='dep_rel')
 
