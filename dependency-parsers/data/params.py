@@ -1,7 +1,7 @@
 UD_ENGLISH_GUM = 'dependency-parsers/en_gum-ud-train.conllu'
 EMBEDDING_FILE = 'dependency-parsers/glove.6B.50d.txt'
-OBJECT_FILE = 'dependency-parsers/data/cache.txt'
-PARAM_FILE = 'dependency-parsers/data/parameters.txt'
+OBJECT_FILE = 'dependency-parsers/data/cache.pickle'
+PARAM_FILE = 'dependency-parsers/data/parameters.pickle'
 
 FILE_SIZE = 4000
 EMBEDDING_DIM = 50
