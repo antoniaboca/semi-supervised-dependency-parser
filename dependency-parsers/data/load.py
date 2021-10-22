@@ -1,9 +1,9 @@
 import pickle
 from processor import SentenceDataset, EmbeddingDataset, Embed
-from params import UD_ENGLISH_GUM, FILE_SIZE, EMBEDDING_FILE, EMBEDDING_DIM, OBJECT_FILE, PARAM_FILE
+from params import UD_ENGLISH_EWT_DEV, FILE_SIZE, EMBEDDING_FILE, EMBEDDING_DIM, OBJECT_FILE, PARAM_FILE
 
-print('Load the sentences from {}...'.format(UD_ENGLISH_GUM))
-training_set = SentenceDataset(UD_ENGLISH_GUM, max_size=FILE_SIZE)
+print('Load the sentences from {}...'.format(UD_ENGLISH_EWT_DEV))
+training_set = SentenceDataset(UD_ENGLISH_EWT_DEV, max_size=FILE_SIZE)
 print('Loaded the training set.')
 
 print('Load the embeddings from {}...'.format(EMBEDDING_FILE))
