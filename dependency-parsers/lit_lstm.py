@@ -1,6 +1,9 @@
 import pickle
 import importlib
 
+import torchmetrics
+
+import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
@@ -55,9 +58,26 @@ class LitLSTMTagger(pl.LightningModule):
             targets.reshape(batch_size * sent_len)
         )
 
-        self.log("train_loss", total_loss, on_step=True, on_epoch=True, prog_bar=True, logger=True)
+        tags = tag_scores.argmax(-1)
 
-        return total_loss
+        num_correct = 0
+        total = 0
+
+        num_correct += torch.count_nonzero((tags == targets) * (targets != 0))
+        total += torch.count_nonzero(targets)
+
+        #self.log("train_loss", total_loss, on_step=True, on_epoch=True, prog_bar=True, logger=True)
+
+        return {'loss': total_loss, 'correct': num_correct, 'total': total}
+
+    def training_epoch_end(self, outputs):
+        correct = 0
+        total = 0
+        for output in outputs:
+            correct = output['correct']
+            total = output['total']
+        
+        print('Accuracy after epoch end: {}'.format(correct/total))
 
 class DataModule(pl.LightningDataModule):
     def __init__(self, PICKLE_FILE, BATCH_SIZE, TRAIN_SPLIT, VAL_SPLIT, PARAM_FILE):
