@@ -32,7 +32,7 @@ train_dataloader = DataLoader(embedded_set, batch_size=BATCH_SIZE, shuffle=False
 print('Initialize the model...')
 model = LSTMTagger(EMBEDDING_DIM, HIDDEN_DIM, NUM_LAYERS, DROPOUT, TAGSET_SIZE)
 loss_function = nn.CrossEntropyLoss(ignore_index=0)
-optimizer = optim.Adam(model.parameters(), lr=0.05)
+optimizer = optim.Adam(model.parameters(), lr=0.1) 
 
 print('Start training the model...')
 

@@ -34,6 +34,8 @@ class LitLSTMTagger(pl.LightningModule):
 
         self.loss_function = nn.CrossEntropyLoss(ignore_index=0)
 
+        self.loss_fn = []
+
     def forward(self, x):
         embedding = x['embedding']
         
@@ -74,26 +76,77 @@ class LitLSTMTagger(pl.LightningModule):
         correct = 0
         total = 0
         for output in outputs:
-            correct = output['correct']
-            total = output['total']
+            correct += output['correct']
+            total += output['total']
+            self.loss_fn.append(output['loss'])
         
         print('Accuracy after epoch end: {}'.format(correct/total))
 
+    def validation_step(self, batch, batch_idx):
+        targets, _ = pad_packed_sequence(batch['tags'], batch_first=True)
+
+        tag_scores = self(batch)
+
+        batch_size, sent_len, num_tags = tag_scores.shape
+        total_loss = self.loss_function(
+            tag_scores.reshape(batch_size * sent_len, num_tags),
+            targets.reshape(batch_size * sent_len)
+        )
+
+        tags = tag_scores.argmax(-1)
+
+        num_correct = 0
+        total = 0
+
+        num_correct += torch.count_nonzero((tags == targets) * (targets != 0))
+        total += torch.count_nonzero(targets)
+
+        #self.log("train_loss", total_loss, on_step=True, on_epoch=True, prog_bar=True, logger=True)
+
+        return {'loss': total_loss, 'correct': num_correct, 'total': total}
+
+    def validation_epoch_end(self, preds):
+        correct = 0
+        total = 0
+        loss = 0
+
+        for pred in preds:
+            correct += pred['correct']
+            total += pred['total']
+            loss += pred['loss']
+
+        self.log('accuracy', correct / total)
+        self.log('loss', loss/len(preds))
+
+        return {'accuracy': correct / total, 'loss': loss/len(preds)}
+
+    def test_step(self, batch, batch_idx):
+        return dict(self.validation_step(batch, batch_idx))
+    
+    def test_epoch_end(self, preds):
+        return self.validation_epoch_end(preds)
+
 class DataModule(pl.LightningDataModule):
-    def __init__(self, PICKLE_FILE, BATCH_SIZE, TRAIN_SPLIT, VAL_SPLIT, PARAM_FILE):
+    def __init__(self, PICKLE_FILE, BATCH_SIZE, PARAM_FILE):
         with open(PICKLE_FILE, 'rb') as file:
-            embedded_set = pickle.load(file)
-        train, val = random_split(embedded_set, [TRAIN_SPLIT, VAL_SPLIT])
-        
-        self.train_dataloader = DataLoader(train, batch_size=BATCH_SIZE, shuffle=False, collate_fn=collate_fn_padder)
-        self.val_dataloader = DataLoader(val, batch_size=BATCH_SIZE, shuffle=False, collate_fn=collate_fn_padder)
+            object = pickle.load(file)
+            train_set = object['train']
+            dev_set = object['dev']
+            test_set = object['test']
+
+        self.train_dataloader = DataLoader(train_set, batch_size=BATCH_SIZE, shuffle=False, collate_fn=collate_fn_padder)
+        self.test_dataloader = DataLoader(test_set, batch_size=BATCH_SIZE, shuffle=False, collate_fn=collate_fn_padder)
+        self.dev_dataloader = DataLoader(dev_set, batch_size=BATCH_SIZE, shuffle=False, collate_fn=collate_fn_padder)
 
         with open(PARAM_FILE, 'rb') as file:
             dict = pickle.load(file)
         self.TAGSET_SIZE = dict['TAGSET_SIZE']
 
+    def dev_dataloader(self):
+        return self.dev_dataloader
+
     def train_dataloader(self):
         return self.train_dataloader
 
-    def val_dataloader(self):
-        return self.val_dataloader
+    def test_dataloader(self):
+        return self.test_dataloader

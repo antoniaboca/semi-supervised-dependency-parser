@@ -3,12 +3,12 @@ import pyconll
 import pyconll.util
 import torch
 from torch.nn.utils.rnn import pack_padded_sequence, pad_sequence 
-
-from allennlp.data.vocabulary import Vocabulary
 from torch.utils.data import Dataset
 
+from allennlp.data.vocabulary import Vocabulary
+
 class SentenceDataset(Dataset):
-    def __init__(self, file, max_size=None, transform=None):
+    def __init__(self, file, vocab=None, max_size=None, transform=None):
         self.transform = transform
         
         words = {}
@@ -16,6 +16,10 @@ class SentenceDataset(Dataset):
         dep_rel = {}
 
         data = pyconll.load_from_file(file)
+        
+        if max_size is None:
+            max_size = len(data)
+
         self.sentences = []
 
         count = 0
@@ -54,7 +58,11 @@ class SentenceDataset(Dataset):
             
             self.sentences.append((word_list, tag_list))
 
-        self.vocabulary = Vocabulary(counter={'words': words, 'pos_tags': pos_tags, 'dep_rel': dep_rel})
+        if vocab is None:
+            self.vocabulary = Vocabulary(counter={'words': words, 'pos_tags': pos_tags, 'dep_rel': dep_rel})
+        else:
+            self.vocabulary = vocab
+
         self.index_to_word = self.vocabulary.get_index_to_token_vocabulary(namespace='words')
         self.index_to_pos = self.vocabulary.get_index_to_token_vocabulary(namespace='pos_tags')
         self.index_to_dep = self.vocabulary.get_index_to_token_vocabulary(namespace='dep_rel')
@@ -67,8 +75,8 @@ class SentenceDataset(Dataset):
         self.tag_set = []
 
         for sentence, tags in self.sentences:
-            sidxs = [self.word_to_index[w] for w in sentence]
-            tidxs = [self.pos_to_index[t] for t in tags]
+            sidxs = [self.vocabulary.get_token_index(w, 'words') for w in sentence]
+            tidxs = [self.vocabulary.get_token_index(t, 'pos_tags') for t in tags]
 
             self.index_set.append(sidxs)
             self.tag_set.append(tidxs)
