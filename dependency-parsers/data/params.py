@@ -6,7 +6,7 @@ EMBEDDING_FILE = 'glove.6B.50d.txt'
 OBJECT_FILE = 'dependency-parsers/data/cache.pickle'
 PARAM_FILE = 'dependency-parsers/data/parameters.pickle'
 
-FILE_SIZE = 2000
+FILE_SIZE = 20000
 TRAIN_SPLIT = 1600
 VAL_SPLIT = 400
 

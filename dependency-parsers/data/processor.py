@@ -21,6 +21,7 @@ class SentenceDataset(Dataset):
             max_size = len(data)
 
         self.sentences = []
+        self.trees = []
 
         count = 0
         for sentence in data:
@@ -55,8 +56,11 @@ class SentenceDataset(Dataset):
                     dep_rel[token.deprel] += 1
                 else:
                     dep_rel[token.deprel] = 1
+                
+                
             
             self.sentences.append((word_list, tag_list))
+            
 
         if vocab is None:
             self.vocabulary = Vocabulary(counter={'words': words, 'pos_tags': pos_tags, 'dep_rel': dep_rel})
