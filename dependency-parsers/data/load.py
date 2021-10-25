@@ -36,3 +36,4 @@ print('Save other size parameters...')
 with open(PARAM_FILE, 'wb') as file:
     pickle.dump({'TAGSET_SIZE': len(training_set.pos_to_index)}, file)
 print('Saved.')
+

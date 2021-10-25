@@ -1,8 +1,8 @@
 
-from torch.nn.modules import loss
+from lit_data_module import DataModule
 from data.params import OBJECT_FILE, BATCH_SIZE, TRAIN_SPLIT, VAL_SPLIT, PARAM_FILE
 from data.params import EMBEDDING_DIM, HIDDEN_DIM, NUM_LAYERS, DROPOUT, NUM_EPOCH
-from lit_lstm import LitLSTMTagger, DataModule
+from lit_lstm import LitLSTMTagger
 
 import pytorch_lightning as pl
 
@@ -13,6 +13,7 @@ model = LitLSTMTagger(EMBEDDING_DIM, HIDDEN_DIM, NUM_LAYERS, DROPOUT, TAGSET)
 
 trainer = pl.Trainer(max_epochs=NUM_EPOCH)
 trainer.fit(model, module.train_dataloader, module.dev_dataloader)
+
 
 loss_fn = model.loss_fn
 
