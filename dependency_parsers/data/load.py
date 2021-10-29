@@ -19,7 +19,7 @@ dev_set = SentenceDataset(UD_ENGLISH_EWT_DEV, vocab=training_set.vocabulary)
 print('Loaded the dev set. Number of sentences: {}'.format(len(dev_set.sentences)))
 
 training_set.transform = Embed(embeddings)
-embedded_set = [training_set[idx] for idx in range(len(training_set))] # now this set is a list of (sentence, embedding, tags)
+embedded_set = [training_set[idx] for idx in range(len(training_set))] # now this set is a list of (sentence, embedding, tags, parent)
 
 test_set.transform = Embed(embeddings)
 embed_test_set = [test_set[idx] for idx in range(len(test_set))]

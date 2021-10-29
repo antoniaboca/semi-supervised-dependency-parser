@@ -8,7 +8,7 @@ from torch.utils.data import Dataset
 from allennlp.data.vocabulary import Vocabulary
 
 class SentenceDataset(Dataset):
-    def __init__(self, file, vocab=None, max_size=None, transform=None):
+    def __init__(self, file, vocab=None, max_size=None, transform=None, ROOT_TOKEN='@@ROOT@@'):
         self.transform = transform
         
         words = {}
@@ -27,10 +27,10 @@ class SentenceDataset(Dataset):
 
         count = 0
         for sentence in data:
-            word_list = []
-            tag_list = []
-            parents = []
-            deps = []
+            word_list = [ROOT_TOKEN]
+            tag_list = [ROOT_TOKEN]
+            parents = [0]
+            deps = [ROOT_TOKEN]
 
             count += 1
             if count > max_size:
@@ -61,16 +61,28 @@ class SentenceDataset(Dataset):
                 else:
                     dep_rel[token.deprel] = 1
                 
-                parents.append(token.head)
+                parents.append(int(token.head))
                 deps.append(token.deprel)
                 
             
-            self.sentences.append((word_list, tag_list))
+            self.sentences.append((word_list, tag_list, parents))
             self.parent_ids.append(parents)
             self.deps_list.append(deps)
 
         if vocab is None:
-            self.vocabulary = Vocabulary(counter={'words': words, 'pos_tag': pos_tags, 'dep_rel': dep_rel})
+            self.vocabulary = Vocabulary(
+                counter={
+                    'words': words, 
+                    'pos_tag': pos_tags, 
+                    'dep_rel': dep_rel
+                    },
+                tokens_to_add={
+                    'words': [ROOT_TOKEN], 
+                    'pos_tag': [ROOT_TOKEN],
+                    'dep_rel': [ROOT_TOKEN]
+                    }
+            )
+
         else:
             self.vocabulary = vocab
 
@@ -84,13 +96,15 @@ class SentenceDataset(Dataset):
 
         self.index_set = []
         self.tag_set = []
+        self.parent_set = []
 
-        for sentence, tags in self.sentences:
+        for sentence, tags, parents in self.sentences:
             sidxs = [self.vocabulary.get_token_index(w, 'words') for w in sentence]
             tidxs = [self.vocabulary.get_token_index(t, 'pos_tag') for t in tags]
 
             self.index_set.append(sidxs)
             self.tag_set.append(tidxs)
+            self.parent_set.append(parents)
         
         for deps in self.deps_list:
             didxs = [self.vocabulary.get_token_index(d, 'dep_rel') for d in deps]
@@ -104,7 +118,7 @@ class SentenceDataset(Dataset):
         if torch.is_tensor(index):
             index = index.tolist()
 
-        sample = (self.index_set[index], self.tag_set[index])
+        sample = (self.index_set[index], self.tag_set[index], self.parent_set[index])
         if self.transform:
             sample = self.transform(sample)
         
@@ -114,9 +128,10 @@ class SentenceDataset(Dataset):
         return self.vocabulary
 
 class EmbeddingDataset(Dataset):
-    def __init__(self, filename, dim, words_to_index):
+    def __init__(self, filename, dim, words_to_index, ROOT_TOKEN='@@ROOT@@'):
         self.embeddings = {}
         self.dim = dim
+        self.embeddings[ROOT_TOKEN] = np.random.rand(dim) # dummy random embedding for the root token
 
         with open(filename) as file:
             for line in file:
@@ -149,28 +164,36 @@ class Embed(object):
         self.embeddings = embeddings
     
     def __call__(self, sample):
-        sentence, tags = sample
+        sentence, tags, parents = sample
         embedded = [self.embeddings[idx] for idx in sentence]
 
-        return (sentence, embedded, tags)
+        return (sentence, embedded, tags, parents)
 
 def collate_fn_padder(samples):
     # batch of samples to be expected to look like
-    # [(index_sent1, embed_sent1, tag_set1), ...]
+    # [(index_sent1, embed_sent1, tag_set1, parent_set1), ...]
 
     #import ipdb; ipdb.set_trace()
-    indexes, embeds, tags = zip(*samples)
+    indexes, embeds, tags, parents = zip(*samples)
 
     sent_lens = torch.tensor([len(sent) for sent in indexes])
 
     indexes = [torch.tensor(sent) for sent in indexes]
     embeds = [torch.tensor(embed) for embed in embeds]
     tags = [torch.tensor(tag) for tag in tags]
+    parents = [torch.tensor(parent) for parent in parents]
 
-    padded_sent = pad_sequence(indexes, batch_first=True)
-    padded_embeds = pad_sequence(embeds, batch_first=True)
-    padded_tags = pad_sequence(tags, batch_first=True)
+    padded_sent = pad_sequence(indexes, batch_first=True, padding_value=-100)
+    padded_embeds = pad_sequence(embeds, batch_first=True, padding_value=-100)
+    padded_tags = pad_sequence(tags, batch_first=True, padding_value=-100)
+    padded_parents = pad_sequence(parents, batch_first=True, padding_value=-100)
 
-    return {'sentence': padded_sent, 'embedding': padded_embeds, 'tags': padded_tags, 'lengths': sent_lens}
+    return {
+        'sentence': padded_sent, 
+        'embedding': padded_embeds, 
+        'tags': padded_tags, 
+        'parents': padded_parents, 
+        'lengths': sent_lens
+    }
 
 
