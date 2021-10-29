@@ -7,7 +7,7 @@ from torch.nn.modules import loss
 import torch.optim as optim 
 
 from torch.utils.data import DataLoader
-from torch.nn.utils.rnn import pad_packed_sequence
+from torch.nn.utils.rnn import pad_packed_sequence, pad_sequence
 
 from lstm import LSTMTagger
 from data.processor import collate_fn_padder
@@ -32,11 +32,15 @@ train_dataloader = DataLoader(embedded_set, batch_size=BATCH_SIZE, shuffle=False
 print('Initialize the model...')
 model = LSTMTagger(EMBEDDING_DIM, HIDDEN_DIM, NUM_LAYERS, DROPOUT, TAGSET_SIZE)
 loss_function = nn.CrossEntropyLoss(ignore_index=0)
-optimizer = optim.Adam(model.parameters(), lr=0.05)
+optimizer = optim.Adam(model.parameters(), lr=0.1) 
 
 print('Start training the model...')
 
 loss_fn = []
+prev_loss = 0.0
+
+delta_loss = []
+
 for epoch in range(NUM_EPOCH):
     loss_value = 0
     instances = 0
@@ -66,6 +70,10 @@ for epoch in range(NUM_EPOCH):
     
     print('Average loss value for epoch {}: {}'.format(epoch, loss_value/instances))
     print('Training accuracy for epoch {}:  {}'.format(epoch, num_correct/total))
+
+    print('Difference between previous loss and this loss: {}'.format(prev_loss - loss_value))
+    delta_loss.append(prev_loss - loss_value)
+    prev_loss = loss_value
 
 with torch.no_grad():
     print('AFTER TRAINING')
@@ -104,6 +112,6 @@ with torch.no_grad():
 
 import matplotlib.pyplot as plt
 
-print('Accuracy: {}'.format(1.0 * correct/total))
-plt.plot(loss_fn)
+print(delta_loss)
+plt.plot(delta_loss)
 plt.show()

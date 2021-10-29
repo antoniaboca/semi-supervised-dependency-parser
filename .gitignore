@@ -3,3 +3,6 @@
 *.pyc
 *.pyo
 *.txt
+*.pickle
+/dependency-parsers/data/*.pickle
+lightning_logs/
