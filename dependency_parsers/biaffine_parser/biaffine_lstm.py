@@ -22,7 +22,7 @@ class G(pl.LightningModule):
         self.reset_parameters()
 
     def forward(self, x):
-        return torch.einsum('bij,bjk->bik', x, self.g)
+        return torch.einsum('bij,jk->bik', x, self.g)
 
     def reset_parameters(self):
         nn.init.zeros_(self.g)
@@ -35,12 +35,12 @@ class Biaffine(pl.LightningModule):
         self.output_dim = output_dim
         self.scale = scale
         
-        self.W = nn.Parameter(torch.Tensor(output_dim, arc_dim, arc_dim))
+        self.W = nn.Parameter(torch.Tensor(arc_dim, arc_dim))
 
         self.reset_parameters()
 
     def forward(self, x, y):
-        return torch.einsum('bij,jk,bkt->bij', x, self.W, y)
+        return torch.einsum('bij,jk,bkt->bit', x, self.W, torch.transpose(y, 1, 2))
 
     def reset_parameters(self):
         nn.init.zeros_(self.W)
@@ -80,21 +80,10 @@ class LitLSTM(pl.LightningModule):
         
         heads = self.hidden2head(lstm_out)
         deps  = self.hidden2dep(lstm_out)
-        
-        eeeh = self.g(heads) + self.g(deps) + self.biaffine(heads, deps)
-        scores = []
-        for idx in range(len(lstm_out)):
-            sequence = lstm_out[idx]
-            dep_score = torch.zeros(len(sequence), len(sequence))
-            for i in range(len(sequence)):
-                for j in range(len(sequence)):
-                    sij = self.g(heads[ idx ][ i ]) + self.g(deps[ idx ][ j ]) + self.biaffine(heads[ idx ][ i ], deps[ idx ][ j ])
-                    dep_score[ i ][ j ] = sij
-            
-            max_score = torch.argmax(dep_score, dim=1)
-            scores.append(dep_score)
 
-        return pad_sequence(scores, batch_first=True)
+        dep_scores = self.g(heads) + self.g(deps) + self.biaffine(heads, deps)
+
+        return dep_scores
     
     def configure_optimizers(self):
         optimizer = optim.Adam(self.parameters(), lr=0.05)
@@ -102,10 +91,9 @@ class LitLSTM(pl.LightningModule):
     
     def training_step(self, train_batch, batch_idx):
         targets = train_batch['parents']
-
+        
         parent_scores = self(train_batch)
 
-        print(parent_scores.shape)
         batch_size, sent_len, score_len = parent_scores.shape
         total_loss = self.loss_function(
             parent_scores.reshape(batch_size * sent_len, score_len),
@@ -139,9 +127,9 @@ class LitLSTM(pl.LightningModule):
 
         parent_scores = self(batch)
 
-        batch_size, sent_len, num_tags = parent_scores.shape
+        batch_size, sent_len, _ = parent_scores.shape
         total_loss = self.loss_function(
-            parent_scores.reshape(batch_size * sent_len, num_tags),
+            parent_scores.reshape(batch_size * sent_len, sent_len),
             targets.reshape(batch_size * sent_len)
         )
 

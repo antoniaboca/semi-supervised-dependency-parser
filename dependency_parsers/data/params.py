@@ -7,7 +7,7 @@ OBJECT_FILE = 'dependency_parsers/data/cache.pickle'
 PARAM_FILE = 'dependency_parsers/data/parameters.pickle'
 ROOT_TOKEN = '@@ROOT@@'
 
-FILE_SIZE = 20000
+FILE_SIZE = 200
 TRAIN_SPLIT = 1600
 VAL_SPLIT = 400
 

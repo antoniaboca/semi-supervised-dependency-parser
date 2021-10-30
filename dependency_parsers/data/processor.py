@@ -188,6 +188,8 @@ def collate_fn_padder(samples):
     padded_tags = pad_sequence(tags, batch_first=True, padding_value=-100)
     padded_parents = pad_sequence(parents, batch_first=True, padding_value=-100)
 
+    assert len(padded_parents[0]) == len(padded_embeds[0])
+    
     return {
         'sentence': padded_sent, 
         'embedding': padded_embeds, 
