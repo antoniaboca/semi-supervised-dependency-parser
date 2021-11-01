@@ -1,5 +1,5 @@
 from lit_data_module import DataModule
-from data.params import OBJECT_FILE, BATCH_SIZE, TRAIN_SPLIT, VAL_SPLIT, PARAM_FILE
+from data.params import OBJECT_FILE, BATCH_SIZE, PARAM_FILE
 from data.params import EMBEDDING_DIM, HIDDEN_DIM, NUM_LAYERS, DROPOUT, NUM_EPOCH, ARC_DIM
 from biaffine_parser.biaffine_lstm import LitLSTM
 

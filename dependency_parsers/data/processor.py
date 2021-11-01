@@ -7,8 +7,10 @@ from torch.utils.data import Dataset
 
 from allennlp.data.vocabulary import Vocabulary
 
+PAD_VALUE = -100
+
 class SentenceDataset(Dataset):
-    def __init__(self, file, vocab=None, max_size=None, transform=None, ROOT_TOKEN='@@ROOT@@'):
+    def __init__(self, file, ROOT_TOKEN, ROOT_TAG, ROOT_LABEL, vocab=None, max_size=None, transform=None):
         self.transform = transform
         
         words = {}
@@ -28,25 +30,28 @@ class SentenceDataset(Dataset):
         count = 0
         for sentence in data:
             word_list = [ROOT_TOKEN]
-            tag_list = [ROOT_TOKEN]
+            tag_list = [ROOT_TAG]
             parents = [0]
-            deps = [ROOT_TOKEN]
+            deps = [ROOT_LABEL]
 
             count += 1
             if count > max_size:
                 break
 
             for token in sentence:
-                if token.lemma is None:
+                if token.id.isdigit():
+                    parents.append(int(token.head))
+                else:
                     continue
+
+                if token.lemma is None or token.upos is None or token.deprel is None:
+                    continue
+
                 if token.lemma in words:
                     words[token.lemma] += 1
                 else:
                     words[token.lemma] = 1
                 word_list.append(token.lemma)
-
-                if token.upos is None:
-                    continue
 
                 if token.upos in pos_tags:
                     pos_tags[token.upos] += 1
@@ -61,7 +66,6 @@ class SentenceDataset(Dataset):
                 else:
                     dep_rel[token.deprel] = 1
                 
-                parents.append(int(token.head))
                 deps.append(token.deprel)
                 
             
@@ -78,8 +82,8 @@ class SentenceDataset(Dataset):
                     },
                 tokens_to_add={
                     'words': [ROOT_TOKEN], 
-                    'pos_tag': [ROOT_TOKEN],
-                    'dep_rel': [ROOT_TOKEN]
+                    'pos_tag': [ROOT_TAG],
+                    'dep_rel': [ROOT_LABEL]
                     }
             )
 
@@ -122,13 +126,22 @@ class SentenceDataset(Dataset):
         if self.transform:
             sample = self.transform(sample)
         
+        try:
+            assert len(self.index_set[index]) == len(self.parent_set[index])
+        except AssertionError:
+            print(index)
+            print('Length {} for {}'.format(len(self.sentences[index][0]), self.sentences[index][0]))
+            print('Length {} for {}'.format(len(self.index_set[index]), self.index_set[index]))
+            print('Length {} for {}'.format(len(self.parent_set[index]), self.parent_set[index]))
+            raise AssertionError
+
         return sample
     
     def getVocabulary(self):
         return self.vocabulary
 
 class EmbeddingDataset(Dataset):
-    def __init__(self, filename, dim, words_to_index, ROOT_TOKEN='@@ROOT@@'):
+    def __init__(self, filename, dim, words_to_index, ROOT_TOKEN):
         self.embeddings = {}
         self.dim = dim
         self.embeddings[ROOT_TOKEN] = np.random.rand(dim) # dummy random embedding for the root token
@@ -183,13 +196,13 @@ def collate_fn_padder(samples):
     tags = [torch.tensor(tag) for tag in tags]
     parents = [torch.tensor(parent) for parent in parents]
 
-    padded_sent = pad_sequence(indexes, batch_first=True, padding_value=-100)
-    padded_embeds = pad_sequence(embeds, batch_first=True, padding_value=-100)
-    padded_tags = pad_sequence(tags, batch_first=True, padding_value=-100)
-    padded_parents = pad_sequence(parents, batch_first=True, padding_value=-100)
+    padded_sent = pad_sequence(indexes, batch_first=True, padding_value=PAD_VALUE)
+    padded_embeds = pad_sequence(embeds, batch_first=True, padding_value=PAD_VALUE)
+    padded_tags = pad_sequence(tags, batch_first=True, padding_value=PAD_VALUE)
+    padded_parents = pad_sequence(parents, batch_first=True, padding_value=PAD_VALUE)
 
     assert len(padded_parents[0]) == len(padded_embeds[0])
-    
+
     return {
         'sentence': padded_sent, 
         'embedding': padded_embeds, 

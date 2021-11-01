@@ -5,9 +5,14 @@ UD_ENGLISH_EWT_TEST = 'en_ewt-ud-test.conllu'
 EMBEDDING_FILE = 'glove.6B.50d.txt'
 OBJECT_FILE = 'dependency_parsers/data/cache.pickle'
 PARAM_FILE = 'dependency_parsers/data/parameters.pickle'
-ROOT_TOKEN = '@@ROOT@@'
 
-FILE_SIZE = 200
+ROOT_TOKEN = '@@ROOT@@'
+ROOT_TAG   = '@@ROOT@@'
+ROOT_LABEL = '@@root@@' # no incoming edge
+
+PAD_VALUE = -100
+
+FILE_SIZE = 4000
 TRAIN_SPLIT = 1600
 VAL_SPLIT = 400
 

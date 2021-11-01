@@ -4,6 +4,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
+import torch.nn.functional as F
 
 from torch.nn.utils.rnn import pad_sequence, pad_packed_sequence, pack_padded_sequence
 from torch.nn import Linear, LSTM
@@ -17,15 +18,14 @@ class G(pl.LightningModule):
         self.input_dim = input_dim
         self.arc_dim = arc_dim
 
-        self.g = nn.Parameter(torch.Tensor(arc_dim, input_dim))
-
-        self.reset_parameters()
+        self.g = nn.Parameter(torch.rand(arc_dim, input_dim))
 
     def forward(self, x):
         return torch.einsum('bij,jk->bik', x, self.g)
 
-    def reset_parameters(self):
-        nn.init.zeros_(self.g)
+    def configure_optimizers(self):
+        optimizer = optim.Adam(self.parameters(), lr=0.05)
+        return optimizer
 
 class Biaffine(pl.LightningModule):
     def __init__(self, input_dim, output_dim, arc_dim, scale=0):
@@ -35,20 +35,20 @@ class Biaffine(pl.LightningModule):
         self.output_dim = output_dim
         self.scale = scale
         
-        self.W = nn.Parameter(torch.Tensor(arc_dim, arc_dim))
-
-        self.reset_parameters()
+        self.W = nn.Parameter(torch.rand(arc_dim, arc_dim))
 
     def forward(self, x, y):
         return torch.einsum('bij,jk,bkt->bit', x, self.W, torch.transpose(y, 1, 2))
 
-    def reset_parameters(self):
-        nn.init.zeros_(self.W)
+    def configure_optimizers(self):
+        optimizer = optim.Adam(self.parameters(), lr=0.05)
+        return optimizer
 
 class LitLSTM(pl.LightningModule):
     def __init__(self, embedding_dim, hidden_dim, num_layers, dropout, arc_dim):
         super(LitLSTM, self).__init__()
         self.hidden_dim = hidden_dim
+        self.arc_dim = arc_dim
 
         self.lstm = LSTM(
             input_size=embedding_dim, 
@@ -70,18 +70,23 @@ class LitLSTM(pl.LightningModule):
     def forward(self, x):
         
         sent_lens = x['lengths']
-
-        #sent_input = pack_padded_sequence(x['sentence'], sent_lens, batch_first=True, enforce_sorted=False)
         embd_input = pack_padded_sequence(x['embedding'], sent_lens, batch_first=True, enforce_sorted=False)
-        #tags_input = pack_padded_sequence(x['tags'], sent_lens, batch_first=True, enforce_sorted=False)
         
         lstm_out, _ = self.lstm(embd_input.float())
         lstm_out, _ = pad_packed_sequence(lstm_out, batch_first=True)
-        
+    
+        maxlen = lstm_out.size(1)
+        mask = torch.arange(maxlen)[None, :] < sent_lens[:, None]
+        mask[:, 0] = False
+
         heads = self.hidden2head(lstm_out)
         deps  = self.hidden2dep(lstm_out)
 
+        heads[~mask] = torch.zeros(self.arc_dim)
+        deps[~mask]  = torch.zeros(self.arc_dim)
+
         dep_scores = self.g(heads) + self.g(deps) + self.biaffine(heads, deps)
+        dep_scores = F.log_softmax(dep_scores, dim=-1)
 
         return dep_scores
     

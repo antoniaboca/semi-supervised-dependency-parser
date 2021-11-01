@@ -1,21 +1,22 @@
 import pickle
 from processor import SentenceDataset, EmbeddingDataset, Embed
 from params import UD_ENGLISH_EWT_TRAIN, UD_ENGLISH_EWT_TEST, UD_ENGLISH_EWT_DEV, FILE_SIZE, EMBEDDING_FILE, EMBEDDING_DIM, OBJECT_FILE, PARAM_FILE
+from params import ROOT_TOKEN, ROOT_LABEL, ROOT_TAG
 
 print('Load the sentences from {}...'.format(UD_ENGLISH_EWT_TRAIN))
-training_set = SentenceDataset(UD_ENGLISH_EWT_TRAIN, max_size=FILE_SIZE)
+training_set = SentenceDataset(UD_ENGLISH_EWT_TRAIN, ROOT_TOKEN, ROOT_TAG, ROOT_LABEL, max_size=FILE_SIZE)
 print('Loaded the training set. Number of sentences: {}'.format(len(training_set.sentences)))
 
 print('Load the embeddings from {}...'.format(EMBEDDING_FILE))
-embeddings = EmbeddingDataset(EMBEDDING_FILE, EMBEDDING_DIM, training_set.word_to_index) 
+embeddings = EmbeddingDataset(EMBEDDING_FILE, EMBEDDING_DIM, training_set.word_to_index, ROOT_TOKEN) 
 print('Loaded the embeddings.')
 
 print('Load the test set from {}...'.format(UD_ENGLISH_EWT_TEST))
-test_set = SentenceDataset(UD_ENGLISH_EWT_TEST, vocab=training_set.vocabulary)
+test_set = SentenceDataset(UD_ENGLISH_EWT_TEST, ROOT_TOKEN, ROOT_TAG, ROOT_LABEL, vocab=training_set.vocabulary)
 print('Loaded the test set. Number of sentences: {}'.format(len(test_set.sentences)))
 
 print('Load the dev set from {}...'.format(UD_ENGLISH_EWT_DEV))
-dev_set = SentenceDataset(UD_ENGLISH_EWT_DEV, vocab=training_set.vocabulary)
+dev_set = SentenceDataset(UD_ENGLISH_EWT_DEV, ROOT_TOKEN, ROOT_TAG, ROOT_LABEL,vocab=training_set.vocabulary)
 print('Loaded the dev set. Number of sentences: {}'.format(len(dev_set.sentences)))
 
 training_set.transform = Embed(embeddings)
