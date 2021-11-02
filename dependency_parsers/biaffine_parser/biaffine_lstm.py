@@ -11,45 +11,35 @@ from torch.nn import Linear, LSTM
 
 import pytorch_lightning as pl
 
-class G(pl.LightningModule):
-    # This class isn't necessary
-    def __init__(self, input_dim, arc_dim):
-        super().__init__()
-
-        self.input_dim = input_dim
-        self.arc_dim = arc_dim
-
-        self.g = nn.Parameter(torch.rand(arc_dim, input_dim))
-
-    def forward(self, x):
-        return torch.einsum('bij,jk->bik', x, self.g)
-
-    def configure_optimizers(self):
-        optimizer = optim.Adam(self.parameters(), lr=0.05)
-        return optimizer
-
-class Biaffine(pl.LightningModule):
+class Biaffine(nn.Module):
     # This should be just a torch.nn.Module
 
     # Ran: You only need one input thing here, and you can just call it dim.
     # self.W is that just a parameters of nn.Parameter(torch.Tensor(dim, dim)).
     # And then you use reset_parameters with:
     #   nn.init.xavier_uniform_(self.W)
-    def __init__(self, input_dim, output_dim, arc_dim, scale=0):
+    def __init__(self, hidden_dim, arc_dim):
         super().__init__()
 
-        self.input_dim = input_dim
-        self.output_dim = output_dim
-        self.scale = scale
-        
         self.W = nn.Parameter(torch.rand(arc_dim, arc_dim))
+        self.hidden2head = Linear(hidden_dim * 2, arc_dim) # this is your g
+        self.hidden2dep  = Linear(hidden_dim * 2, arc_dim) # this is your f
 
-    def forward(self, x, y):
-        return torch.einsum('bij,jk,bkt->bit', x, self.W, torch.transpose(y, 1, 2))
+        self.reset_parameters()
 
-    def configure_optimizers(self):
-        optimizer = optim.Adam(self.parameters(), lr=0.05)
-        return optimizer
+    def forward(self, lstm_out, mask):
+        head = self.hidden2head(lstm_out)
+        dep  = self.hidden2dep(lstm_out)
+        
+        mask = mask.unsqueeze(-1).expand(-1, -1, head.size(2))
+        head[~mask] = 0.0
+        dep[~mask]  = 0.0
+        dep[:, 0, :] = 0.0                                      # the root cannot be a depedent
+
+        return torch.einsum('bij,jk,bkt->bit', head, self.W, torch.transpose(dep, 1, 2))
+
+    def reset_parameters(self):
+        nn.init.xavier_uniform_(self.W)
 
 class LitLSTM(pl.LightningModule):
     def __init__(self, embedding_dim, hidden_dim, num_layers, dropout, arc_dim):
@@ -64,18 +54,10 @@ class LitLSTM(pl.LightningModule):
             dropout=dropout,
             bidirectional=True
         )
-
-        #  Ran: You can move these hidden things into the Biaffine class instead,
-        #  then you don't need a compute_biaffine function and can just do self.biaffine(lstm_out)
-        self.hidden2head = Linear(hidden_dim * 2, arc_dim) # Ran: this is your g
-        self.hidden2dep  = Linear(hidden_dim * 2, arc_dim) # Ran: this is your f
-        self.biaffine    = Biaffine(arc_dim, 1, arc_dim)
-        self.g           = G(1, arc_dim)
-
+        
+        self.biaffine    = Biaffine(hidden_dim, arc_dim)
         self.loss_function = nn.CrossEntropyLoss(ignore_index=-100)
         
-        self.loss_fn = []
-
     def mask_head(self, head, batch, maxlen, sent_lens):
         #mask unwanted edges
         mask = torch.zeros(batch, maxlen, self.arc_dim)
@@ -113,22 +95,20 @@ class LitLSTM(pl.LightningModule):
     def forward(self, x):
         
         sent_lens = x['lengths']
+
         # Ran: You can make your mask here using sent_lens. The following should do the trick:
-        #       embeddings = x['embedding']
-        #       max_len = embeddings.shape[1]
-        #       mask = torch.arange(max_len).expand(len(lens), max_len) < sent_lens.unsqueeze(1)
+        embeddings = x['embedding']
+        max_len = embeddings.shape[1]
+        mask = torch.arange(max_len).expand(len(sent_lens), max_len) < sent_lens.unsqueeze(1)
+        
         embd_input = pack_padded_sequence(x['embedding'], sent_lens, batch_first=True, enforce_sorted=False)
         
         lstm_out, _ = self.lstm(embd_input.float())
         lstm_out, _ = pad_packed_sequence(lstm_out, batch_first=True)
 
-        batch, maxlen, _ = lstm_out.shape
-        
-        heads = self.hidden2head(lstm_out)
-        deps  = self.hidden2dep(lstm_out)
+        dep_scores = self.biaffine(lstm_out, mask)
+        return dep_scores
 
-        return self.compute_biaffine(heads, deps, batch, maxlen, sent_lens)
-    
     def configure_optimizers(self):
         optimizer = optim.Adam(self.parameters(), lr=0.05)
         return optimizer
@@ -139,7 +119,6 @@ class LitLSTM(pl.LightningModule):
 
         parent_scores = self(train_batch)
 
-        #import ipdb; ipdb.set_trace()
         batch_size, sent_len, score_len = parent_scores.shape
         total_loss = self.loss_function(
             parent_scores.reshape(batch_size * sent_len, score_len),
@@ -152,7 +131,7 @@ class LitLSTM(pl.LightningModule):
         total = 0
 
         num_correct += torch.count_nonzero((parents == targets) * (targets != -100))
-        total += torch.count_nonzero((targets != -100))
+        total += torch.count_nonzero(targets * (targets != -100))
 
         return {'loss': total_loss, 'correct': num_correct, 'total': total}
 
@@ -162,7 +141,6 @@ class LitLSTM(pl.LightningModule):
         for output in outputs:
             correct += output['correct']
             total += output['total']
-            self.loss_fn.append(output['loss'])
         
         print('Accuracy after epoch end: {}'.format(correct/total))
 
@@ -172,7 +150,6 @@ class LitLSTM(pl.LightningModule):
         
         parent_scores = self(batch)
 
-        #import ipdb; ipdb.set_trace()
         batch_size, sent_len, _ = parent_scores.shape
         total_loss = self.loss_function(
             parent_scores.reshape(batch_size * sent_len, sent_len),
@@ -185,7 +162,7 @@ class LitLSTM(pl.LightningModule):
         total = 0
 
         num_correct += torch.count_nonzero((parents == targets) * (targets != -100))
-        total += torch.count_nonzero((targets != -100))
+        total += torch.count_nonzero(targets * (targets != -100))
 
         #self.log("train_loss", total_loss, on_step=True, on_epoch=True, prog_bar=True, logger=True)
 

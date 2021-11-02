@@ -13,8 +13,6 @@ model = LitLSTM(EMBEDDING_DIM, HIDDEN_DIM, NUM_LAYERS, DROPOUT, ARC_DIM)
 trainer = pl.Trainer(max_epochs=NUM_EPOCH)
 trainer.fit(model, module.train_dataloader, module.dev_dataloader)
 
-loss_fn = model.loss_fn
-
 #import matplotlib.pyplot as plt
 
 #plt.plot(loss_fn)
