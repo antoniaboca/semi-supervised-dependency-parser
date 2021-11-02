@@ -12,6 +12,7 @@ from torch.nn import Linear, LSTM
 import pytorch_lightning as pl
 
 class G(pl.LightningModule):
+    # This class isn't necessary
     def __init__(self, input_dim, arc_dim):
         super().__init__()
 
@@ -28,6 +29,12 @@ class G(pl.LightningModule):
         return optimizer
 
 class Biaffine(pl.LightningModule):
+    # This should be just a torch.nn.Module
+
+    # Ran: You only need one input thing here, and you can just call it dim.
+    # self.W is that just a parameters of nn.Parameter(torch.Tensor(dim, dim)).
+    # And then you use reset_parameters with:
+    #   nn.init.xavier_uniform_(self.W)
     def __init__(self, input_dim, output_dim, arc_dim, scale=0):
         super().__init__()
 
@@ -58,8 +65,10 @@ class LitLSTM(pl.LightningModule):
             bidirectional=True
         )
 
-        self.hidden2head = Linear(hidden_dim * 2, arc_dim)
-        self.hidden2dep  = Linear(hidden_dim * 2, arc_dim)
+        #  Ran: You can move these hidden things into the Biaffine class instead,
+        #  then you don't need a compute_biaffine function and can just do self.biaffine(lstm_out)
+        self.hidden2head = Linear(hidden_dim * 2, arc_dim) # Ran: this is your g
+        self.hidden2dep  = Linear(hidden_dim * 2, arc_dim) # Ran: this is your f
         self.biaffine    = Biaffine(arc_dim, 1, arc_dim)
         self.g           = G(1, arc_dim)
 
@@ -74,6 +83,7 @@ class LitLSTM(pl.LightningModule):
             mask[idx, 0:sent_lens[idx]] = torch.ones(self.arc_dim)          #the root is definitely a head
 
         head_v = head * mask
+        # Ran: You do not need head_m, you should be able to just add head_v and it will broadcast to the right matrix size
         head_m = (self.g(head_v)).expand((-1, -1, maxlen)) # create matrix to add to the biaffine matrix
         return (head_v, head_m)
     
@@ -84,6 +94,7 @@ class LitLSTM(pl.LightningModule):
             mask[idx, 1:sent_lens[idx]] = torch.ones(self.arc_dim)      #the root cannot be a dependant
 
         deps_v = deps * mask
+        # Ran: You do not need deps_m, you should be able to just add head_v and it will broadcast to the right matrix size
         deps_m = torch.transpose((self.g(deps_v)).expand((-1, -1, maxlen)), 1, 2)
         return (deps_v, deps_m)
 
@@ -102,6 +113,10 @@ class LitLSTM(pl.LightningModule):
     def forward(self, x):
         
         sent_lens = x['lengths']
+        # Ran: You can make your mask here using sent_lens. The following should do the trick:
+        #       embeddings = x['embedding']
+        #       max_len = embeddings.shape[1]
+        #       mask = torch.arange(max_len).expand(len(lens), max_len) < sent_lens.unsqueeze(1)
         embd_input = pack_padded_sequence(x['embedding'], sent_lens, batch_first=True, enforce_sorted=False)
         
         lstm_out, _ = self.lstm(embd_input.float())
