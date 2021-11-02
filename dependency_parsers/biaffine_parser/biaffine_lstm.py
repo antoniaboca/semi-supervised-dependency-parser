@@ -19,17 +19,22 @@ class Biaffine(nn.Module):
         self.hidden2head = Linear(hidden_dim * 2, arc_dim) # this is your g
         self.hidden2dep  = Linear(hidden_dim * 2, arc_dim) # this is your f
 
+        self.head_score = Linear(arc_dim, 1)
+        self.dep_score = Linear(arc_dim, 1)
+
         self.reset_parameters()
 
     def forward(self, lstm_out, mask):
-        head = self.hidden2head(lstm_out)
-        dep  = self.hidden2dep(lstm_out)
+        head = F.relu(self.hidden2head(lstm_out))
+        dep  = F.relu(self.hidden2dep(lstm_out))
         
         mask = mask.unsqueeze(-1).expand(-1, -1, head.size(2))
         head[~mask] = 0.0
         dep[~mask]  = 0.0
 
-        return torch.einsum('bij,jk,bkt->bit', head, self.W, torch.transpose(dep, 1, 2))
+        head_dep_scores = torch.einsum('bij,jk,bkt->bit', head, self.W, torch.transpose(dep, 1, 2))
+
+        return self.head_score(head) + self.dep_score(dep) + head_dep_scores
 
     def reset_parameters(self):
         nn.init.xavier_uniform_(self.W)
@@ -47,7 +52,7 @@ class LitLSTM(pl.LightningModule):
             dropout=dropout,
             bidirectional=True
         )
-        
+
         self.biaffine    = Biaffine(hidden_dim, arc_dim)
         self.loss_function = nn.CrossEntropyLoss(ignore_index=-100)
         
@@ -83,6 +88,7 @@ class LitLSTM(pl.LightningModule):
             parent_scores.reshape(batch_size * sent_len, score_len),
             targets.reshape(batch_size * sent_len)
         )
+        # print(total_loss)
 
         parents = torch.argmax(parent_scores, dim=2)
 
