@@ -12,12 +12,6 @@ from torch.nn import Linear, LSTM
 import pytorch_lightning as pl
 
 class Biaffine(nn.Module):
-    # This should be just a torch.nn.Module
-
-    # Ran: You only need one input thing here, and you can just call it dim.
-    # self.W is that just a parameters of nn.Parameter(torch.Tensor(dim, dim)).
-    # And then you use reset_parameters with:
-    #   nn.init.xavier_uniform_(self.W)
     def __init__(self, hidden_dim, arc_dim):
         super().__init__()
 
@@ -34,7 +28,6 @@ class Biaffine(nn.Module):
         mask = mask.unsqueeze(-1).expand(-1, -1, head.size(2))
         head[~mask] = 0.0
         dep[~mask]  = 0.0
-        dep[:, 0, :] = 0.0                                      # the root cannot be a depedent
 
         return torch.einsum('bij,jk,bkt->bit', head, self.W, torch.transpose(dep, 1, 2))
 
@@ -58,40 +51,6 @@ class LitLSTM(pl.LightningModule):
         self.biaffine    = Biaffine(hidden_dim, arc_dim)
         self.loss_function = nn.CrossEntropyLoss(ignore_index=-100)
         
-    def mask_head(self, head, batch, maxlen, sent_lens):
-        #mask unwanted edges
-        mask = torch.zeros(batch, maxlen, self.arc_dim)
-        for idx in range(batch):
-            mask[idx, 0:sent_lens[idx]] = torch.ones(self.arc_dim)          #the root is definitely a head
-
-        head_v = head * mask
-        # Ran: You do not need head_m, you should be able to just add head_v and it will broadcast to the right matrix size
-        head_m = (self.g(head_v)).expand((-1, -1, maxlen)) # create matrix to add to the biaffine matrix
-        return (head_v, head_m)
-    
-    def mask_deps(self, deps, batch, maxlen, sent_lens):
-        #mask unwanted edges
-        mask = torch.zeros(batch, maxlen, self.arc_dim)
-        for idx in range(batch):
-            mask[idx, 1:sent_lens[idx]] = torch.ones(self.arc_dim)      #the root cannot be a dependant
-
-        deps_v = deps * mask
-        # Ran: You do not need deps_m, you should be able to just add head_v and it will broadcast to the right matrix size
-        deps_m = torch.transpose((self.g(deps_v)).expand((-1, -1, maxlen)), 1, 2)
-        return (deps_v, deps_m)
-
-    def compute_biaffine(self, head, deps, batch, maxlen, sent_lens):
-        head_v, head_m = self.mask_head(head, batch, maxlen, sent_lens)
-        deps_v, deps_m = self.mask_deps(deps, batch, maxlen, sent_lens)
-
-        biaffine_m = self.biaffine(head_v, deps_v)
-        mask = biaffine_m == 0.0
-
-        dep_scores = head_m + deps_m + biaffine_m
-        dep_scores[mask] = 0.0
-
-        return dep_scores
-
     def forward(self, x):
         
         sent_lens = x['lengths']
@@ -115,7 +74,7 @@ class LitLSTM(pl.LightningModule):
     
     def training_step(self, train_batch, batch_idx):
         targets = train_batch['parents']
-        targets[:, 0] = -100 # we are not interested in the parent of the ROOT TOKEN
+        targets[:, 0] = -100                # we are not interested in the parent of the ROOT TOKEN
 
         parent_scores = self(train_batch)
 
