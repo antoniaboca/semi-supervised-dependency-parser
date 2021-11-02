@@ -15,7 +15,7 @@ class Biaffine(nn.Module):
     def __init__(self, hidden_dim, arc_dim):
         super().__init__()
 
-        self.W = nn.Parameter(torch.rand(arc_dim, arc_dim))
+        self.W = nn.Parameter(torch.Tensor(arc_dim, arc_dim))
         self.hidden2head = Linear(hidden_dim * 2, arc_dim) # this is your g
         self.hidden2dep  = Linear(hidden_dim * 2, arc_dim) # this is your f
 
@@ -27,14 +27,15 @@ class Biaffine(nn.Module):
     def forward(self, lstm_out, mask):
         head = F.relu(self.hidden2head(lstm_out))
         dep  = F.relu(self.hidden2dep(lstm_out))
-        
-        mask = mask.unsqueeze(-1).expand(-1, -1, head.size(2))
-        head[~mask] = 0.0
-        dep[~mask]  = 0.0
 
-        head_dep_scores = torch.einsum('bij,jk,bkt->bit', head, self.W, torch.transpose(dep, 1, 2))
+        dep_scores = torch.matmul(head, self.W)
+        dep_scores = torch.bmm(dep_scores, dep.transpose(1, 2))
+        dep_scores += self.head_score(head) + self.dep_score(dep).transpose(1, 2)
 
-        return self.head_score(head) + self.dep_score(dep) + head_dep_scores
+        mask = torch.bmm(mask.unsqueeze(2).int(), mask.unsqueeze(1).int()).bool()
+
+        dep_scores[~mask] = float('-inf')
+        return dep_scores
 
     def reset_parameters(self):
         nn.init.xavier_uniform_(self.W)
@@ -88,7 +89,6 @@ class LitLSTM(pl.LightningModule):
             parent_scores.reshape(batch_size * sent_len, score_len),
             targets.reshape(batch_size * sent_len)
         )
-        # print(total_loss)
 
         parents = torch.argmax(parent_scores, dim=2)
 
@@ -112,7 +112,7 @@ class LitLSTM(pl.LightningModule):
     def validation_step(self, batch, batch_idx):
         targets = batch['parents']
         targets[:, 0] = -100
-        
+
         parent_scores = self(batch)
 
         batch_size, sent_len, _ = parent_scores.shape
