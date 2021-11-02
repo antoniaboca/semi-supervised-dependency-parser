@@ -89,7 +89,7 @@ class LitLSTM(pl.LightningModule):
 
     def compute_biaffine(self, head, deps, batch, maxlen, sent_lens):
         head_v, head_m = self.mask_head(head, batch, maxlen, sent_lens)
-        deps_v, deps_m = self.mask_deps(head, batch, maxlen, sent_lens)
+        deps_v, deps_m = self.mask_deps(deps, batch, maxlen, sent_lens)
 
         biaffine_m = self.biaffine(head_v, deps_v)
         mask = biaffine_m == 0.0
