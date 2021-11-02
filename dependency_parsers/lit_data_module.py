@@ -1,7 +1,5 @@
 import pickle
 
-import torchmetrics
-
 from data.processor import collate_fn_padder
 
 import pytorch_lightning as pl
@@ -15,9 +13,9 @@ class DataModule(pl.LightningDataModule):
             dev_set = object['dev']
             test_set = object['test']
 
-        self.train_dataloader = DataLoader(train_set, batch_size=BATCH_SIZE, shuffle=True, collate_fn=collate_fn_padder)
+        self.train_dataloader = DataLoader(train_set, batch_size=BATCH_SIZE, shuffle=False, collate_fn=collate_fn_padder)
         self.test_dataloader = DataLoader(test_set, batch_size=BATCH_SIZE, shuffle=True, collate_fn=collate_fn_padder)
-        self.dev_dataloader = DataLoader(dev_set, batch_size=BATCH_SIZE, shuffle=True, collate_fn=collate_fn_padder)
+        self.dev_dataloader = DataLoader(dev_set, batch_size=BATCH_SIZE, shuffle=False, collate_fn=collate_fn_padder)
 
         with open(PARAM_FILE, 'rb') as file:
             dict = pickle.load(file)

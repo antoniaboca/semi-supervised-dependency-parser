@@ -67,6 +67,38 @@ class LitLSTM(pl.LightningModule):
         
         self.loss_fn = []
 
+    def mask_head(self, head, batch, maxlen, sent_lens):
+        #mask unwanted edges
+        mask = torch.zeros(batch, maxlen, self.arc_dim)
+        for idx in range(batch):
+            mask[idx, 0:sent_lens[idx]] = torch.ones(self.arc_dim)          #the root is definitely a head
+
+        head_v = head * mask
+        head_m = (self.g(head_v)).expand((-1, -1, maxlen)) # create matrix to add to the biaffine matrix
+        return (head_v, head_m)
+    
+    def mask_deps(self, deps, batch, maxlen, sent_lens):
+        #mask unwanted edges
+        mask = torch.zeros(batch, maxlen, self.arc_dim)
+        for idx in range(batch):
+            mask[idx, 1:sent_lens[idx]] = torch.ones(self.arc_dim)      #the root cannot be a dependant
+
+        deps_v = deps * mask
+        deps_m = torch.transpose((self.g(deps_v)).expand((-1, -1, maxlen)), 1, 2)
+        return (deps_v, deps_m)
+
+    def compute_biaffine(self, head, deps, batch, maxlen, sent_lens):
+        head_v, head_m = self.mask_head(head, batch, maxlen, sent_lens)
+        deps_v, deps_m = self.mask_deps(head, batch, maxlen, sent_lens)
+
+        biaffine_m = self.biaffine(head_v, deps_v)
+        mask = biaffine_m == 0.0
+
+        dep_scores = head_m + deps_m + biaffine_m
+        dep_scores[mask] = 0.0
+
+        return dep_scores
+
     def forward(self, x):
         
         sent_lens = x['lengths']
@@ -74,21 +106,13 @@ class LitLSTM(pl.LightningModule):
         
         lstm_out, _ = self.lstm(embd_input.float())
         lstm_out, _ = pad_packed_sequence(lstm_out, batch_first=True)
-    
-        maxlen = lstm_out.size(1)
-        mask = torch.arange(maxlen)[None, :] < sent_lens[:, None]
-        mask[:, 0] = False
 
+        batch, maxlen, _ = lstm_out.shape
+        
         heads = self.hidden2head(lstm_out)
         deps  = self.hidden2dep(lstm_out)
 
-        heads[~mask] = torch.zeros(self.arc_dim)
-        deps[~mask]  = torch.zeros(self.arc_dim)
-
-        dep_scores = self.g(heads) + self.g(deps) + self.biaffine(heads, deps)
-        dep_scores = F.log_softmax(dep_scores, dim=-1)
-
-        return dep_scores
+        return self.compute_biaffine(heads, deps, batch, maxlen, sent_lens)
     
     def configure_optimizers(self):
         optimizer = optim.Adam(self.parameters(), lr=0.05)
@@ -96,9 +120,11 @@ class LitLSTM(pl.LightningModule):
     
     def training_step(self, train_batch, batch_idx):
         targets = train_batch['parents']
-        
+        targets[:, 0] = -100 # we are not interested in the parent of the ROOT TOKEN
+
         parent_scores = self(train_batch)
 
+        #import ipdb; ipdb.set_trace()
         batch_size, sent_len, score_len = parent_scores.shape
         total_loss = self.loss_function(
             parent_scores.reshape(batch_size * sent_len, score_len),
@@ -111,9 +137,7 @@ class LitLSTM(pl.LightningModule):
         total = 0
 
         num_correct += torch.count_nonzero((parents == targets) * (targets != -100))
-        total += torch.count_nonzero(targets)
-
-        #self.log("train_loss", total_loss, on_step=True, on_epoch=True, prog_bar=True, logger=True)
+        total += torch.count_nonzero((targets != -100))
 
         return {'loss': total_loss, 'correct': num_correct, 'total': total}
 
@@ -129,9 +153,11 @@ class LitLSTM(pl.LightningModule):
 
     def validation_step(self, batch, batch_idx):
         targets = batch['parents']
-
+        targets[:, 0] = -100
+        
         parent_scores = self(batch)
 
+        #import ipdb; ipdb.set_trace()
         batch_size, sent_len, _ = parent_scores.shape
         total_loss = self.loss_function(
             parent_scores.reshape(batch_size * sent_len, sent_len),
@@ -144,7 +170,7 @@ class LitLSTM(pl.LightningModule):
         total = 0
 
         num_correct += torch.count_nonzero((parents == targets) * (targets != -100))
-        total += torch.count_nonzero(targets)
+        total += torch.count_nonzero((targets != -100))
 
         #self.log("train_loss", total_loss, on_step=True, on_epoch=True, prog_bar=True, logger=True)
 

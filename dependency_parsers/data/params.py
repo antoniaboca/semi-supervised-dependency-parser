@@ -12,7 +12,7 @@ ROOT_LABEL = '@@root@@' # no incoming edge
 
 PAD_VALUE = -100
 
-FILE_SIZE = 4000
+FILE_SIZE = 2000
 TRAIN_SPLIT = 1600
 VAL_SPLIT = 400
 
