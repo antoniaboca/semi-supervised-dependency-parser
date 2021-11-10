@@ -9,7 +9,8 @@ import pytorch_lightning as pl
 module = DataModule(OBJECT_FILE, BATCH_SIZE, PARAM_FILE)
 
 TAGSET = module.TAGSET_SIZE
-model = LitLSTM(EMBEDDING_DIM, HIDDEN_DIM, NUM_LAYERS, DROPOUT, ARC_DIM)
+embeddings = module.embeddings
+model = LitLSTM(embeddings, EMBEDDING_DIM, HIDDEN_DIM, NUM_LAYERS, DROPOUT, ARC_DIM)
 
 torch.autograd.set_detect_anomaly(True)
 

@@ -8,6 +8,7 @@ from torch.utils.data import Dataset
 from allennlp.data.vocabulary import Vocabulary
 
 PAD_VALUE = -100
+PAD_IDX = 0
 
 class SentenceDataset(Dataset):
     def __init__(self, file, ROOT_TOKEN, ROOT_TAG, ROOT_LABEL, vocab=None, max_size=None, transform=None):
@@ -29,6 +30,8 @@ class SentenceDataset(Dataset):
 
         count = 0
         for sentence in data:
+            # if len(sentence) > 20:
+            #    continue
             word_list = [ROOT_TOKEN]
             tag_list = [ROOT_TAG]
             parents = [0]
@@ -46,12 +49,14 @@ class SentenceDataset(Dataset):
 
                 if token.lemma is None or token.upos is None or token.deprel is None:
                     continue
+                
 
+                word = token.lemma.lower()
                 if token.lemma in words:
-                    words[token.lemma] += 1
+                    words[word] += 1
                 else:
-                    words[token.lemma] = 1
-                word_list.append(token.lemma)
+                    words[word] = 1
+                word_list.append(word)
 
                 if token.upos in pos_tags:
                     pos_tags[token.upos] += 1
@@ -156,10 +161,21 @@ class EmbeddingDataset(Dataset):
                 
                 self.embeddings[word] = np.asarray(embeds)
 
-        indexed = np.zeros((len(words_to_index), self.dim), dtype=float)
-        for word, values in self.embeddings.items():
-            if word in words_to_index:
-                indexed[words_to_index[word]] = values
+        #indexed = np.random.rand(len(words_to_index), self.dim)
+        indexed = np.zeros((len(words_to_index), self.dim), dtype=np.float64)
+
+        #for word, values in self.embeddings.items():
+        #    if word in words_to_index:
+        #        indexed[words_to_index[word]] = values
+        #        count -= 1
+
+        missing = []
+        for word, index in words_to_index.items():
+            if word in self.embeddings:
+                values = self.embeddings[word]
+                indexed[index] = values
+            else:
+                missing.append(word)
         
         self.idx_embeds = indexed
     
@@ -187,25 +203,27 @@ def collate_fn_padder(samples):
     # [(index_sent1, embed_sent1, tag_set1, parent_set1), ...]
 
     #import ipdb; ipdb.set_trace()
-    indexes, embeds, tags, parents = zip(*samples)
+    indexes, tags, parents = zip(*samples)
+
+    # indexes, embeds, tags, parents = zip(*samples)
 
     sent_lens = torch.tensor([len(sent) for sent in indexes])
 
     indexes = [torch.tensor(sent) for sent in indexes]
-    embeds = [torch.tensor(embed) for embed in embeds]
+    # embeds = [torch.tensor(embed) for embed in embeds]
     tags = [torch.tensor(tag) for tag in tags]
     parents = [torch.tensor(parent) for parent in parents]
 
-    padded_sent = pad_sequence(indexes, batch_first=True, padding_value=PAD_VALUE)
-    padded_embeds = pad_sequence(embeds, batch_first=True, padding_value=PAD_VALUE)
-    padded_tags = pad_sequence(tags, batch_first=True, padding_value=PAD_VALUE)
+    padded_sent = pad_sequence(indexes, batch_first=True, padding_value=0)
+    # padded_embeds = pad_sequence(embeds, batch_first=True, padding_value=0.0)
+    padded_tags = pad_sequence(tags, batch_first=True, padding_value=0)
     padded_parents = pad_sequence(parents, batch_first=True, padding_value=PAD_VALUE)
 
-    assert len(padded_parents[0]) == len(padded_embeds[0])
+    #assert len(padded_parents[0]) == len(padded_embeds[0])
 
     return {
         'sentence': padded_sent, 
-        'embedding': padded_embeds, 
+        #'embedding': padded_embeds, 
         'tags': padded_tags, 
         'parents': padded_parents, 
         'lengths': sent_lens

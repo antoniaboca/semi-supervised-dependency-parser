@@ -12,6 +12,7 @@ class DataModule(pl.LightningDataModule):
             train_set = object['train']
             dev_set = object['dev']
             test_set = object['test']
+            self.embeddings = object['embeddings']
 
         self.train_dataloader = DataLoader(train_set, batch_size=BATCH_SIZE, shuffle=False, collate_fn=collate_fn_padder)
         self.test_dataloader = DataLoader(test_set, batch_size=BATCH_SIZE, shuffle=True, collate_fn=collate_fn_padder)
