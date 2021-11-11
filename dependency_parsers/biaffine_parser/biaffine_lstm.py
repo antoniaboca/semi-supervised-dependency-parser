@@ -129,7 +129,7 @@ class LitLSTM(pl.LightningModule):
         return dep_scores
 
     def configure_optimizers(self):
-        optimizer = optim.Adam(self.parameters(), lr=0.05)
+        optimizer = optim.Adam(self.parameters(), lr=2e-3)
         return optimizer
     
     def training_step(self, train_batch, batch_idx):

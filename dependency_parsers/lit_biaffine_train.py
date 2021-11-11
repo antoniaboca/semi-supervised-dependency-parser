@@ -12,7 +12,6 @@ TAGSET = module.TAGSET_SIZE
 embeddings = module.embeddings
 model = LitLSTM(embeddings, EMBEDDING_DIM, HIDDEN_DIM, NUM_LAYERS, DROPOUT, ARC_DIM)
 
-torch.autograd.set_detect_anomaly(True)
 
 trainer = pl.Trainer(max_epochs=NUM_EPOCH)
 trainer.fit(model, module.train_dataloader, module.dev_dataloader)
