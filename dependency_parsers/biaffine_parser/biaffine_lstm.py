@@ -63,6 +63,7 @@ class LitLSTM(pl.LightningModule):
 
         self.alt_loss = nn.CrossEntropyLoss(ignore_index=-100)
 
+        self.log_loss = []
     def loss_function(self, parent_scores, lengths, targets):
         batch, maxlen, _ = parent_scores.shape
 
@@ -71,9 +72,13 @@ class LitLSTM(pl.LightningModule):
         mask = pads.unsqueeze(1) | pads.unsqueeze(2)
         rows = pads.unsqueeze(-1).expand((batch, maxlen, maxlen))
 
-        # mask rows of padding tokens with 0 so that softmax doesn't complain
-        parent_scores[rows] = 0.0
-        
+        # set the scores of arcs to padding tokens to a large negative number
+        parent_scores.masked_fill_(mask, -1e9)
+        # set the scores of arcs incoming to root
+        parent_scores[:, :, 0] = -1e9
+        # set the scores of self loops 
+        parent_scores.masked_fill_(torch.eye(maxlen).bool(), -1e9)
+
         # normalize scores usign softmax
         _S = F.log_softmax(parent_scores, dim=-1)
         S = torch.clone(_S)
@@ -81,6 +86,7 @@ class LitLSTM(pl.LightningModule):
         # compute the log partition of the graph using MTT
         Z = self.log_partition(S, lengths)
 
+        S = torch.clone(_S)
         # set the scores of arcs to padding tokens to 0
         S.masked_fill_(mask, 0)
         # set the scores of arcs incoming to root
@@ -94,18 +100,24 @@ class LitLSTM(pl.LightningModule):
         valid = torch.reshape(targets, (batch * maxlen,))
 
         masker = valid == -100
-        indexer = torch.arange(maxlen).repeat(batch, 1).reshape((batch * maxlen,))
-
+        offset = torch.arange(start=0, end=maxlen * batch, step=maxlen).unsqueeze(-1).expand(-1, maxlen).reshape((batch * maxlen,))
+        indexer = torch.arange(maxlen).repeat(batch, 1).reshape((batch*maxlen,))
         assert valid.shape == indexer.shape
-        indexer[masker] = 0
+        
         valid[masker] = 0
+        valid = valid + offset
 
         # get the sum of edges of each target tree in the batch
         sums = S[valid, indexer].reshape(batch, maxlen)
 
         # compute the negative log likelihood of each tree
-        P = - (sums.sum(dim=-1) - Z)
 
+        P = - (sums.sum(dim=-1) - Z)
+        try:
+            assert P.mean() > 0
+        except AssertionError:
+            import ipdb
+            ipdb.post_mortem()
         return P.mean()
 
     def forward(self, x):
@@ -144,18 +156,15 @@ class LitLSTM(pl.LightningModule):
         pads = torch.arange(maxlen) >= lengths.unsqueeze(1)
         rows = pads.unsqueeze(-1).expand((batch, maxlen, maxlen))
 
-        # mask rows of padding tokens with 0 so that softmax doesn't complain
-        # parent_scores[rows] = 0.0   
-
-        total_loss = self.alt_loss(
-            parent_scores.reshape((batch * maxlen), maxlen),
-            targets.reshape((batch * maxlen,))
-        )
-        # total_loss = self.loss_function(
-        #    parent_scores,
-        #    train_batch['lengths'],
-        #    torch.clone(targets)
+        #total_loss = self.alt_loss(
+        #    parent_scores.reshape((batch * maxlen), maxlen),
+        #    targets.reshape((batch * maxlen,))
         #)
+        total_loss = self.loss_function(
+            parent_scores,
+            train_batch['lengths'],
+            torch.clone(targets)
+        )
 
         parents = torch.argmax(parent_scores, dim=2)
 
@@ -170,11 +179,14 @@ class LitLSTM(pl.LightningModule):
     def training_epoch_end(self, outputs):
         correct = 0
         total = 0
+        loss = 0.0
         for output in outputs:
             correct += output['correct']
             total += output['total']
+            loss += output['loss'] / len(outputs)
         
-        print('Accuracy after epoch end: {}'.format(correct/total))
+        self.log_loss.append(loss)
+        print('\nAccuracy after epoch end: {:3.3f}'.format(correct/total))
 
     def validation_step(self, val_batch, batch_idx):
         targets = val_batch['parents']
@@ -182,15 +194,16 @@ class LitLSTM(pl.LightningModule):
 
         batch, maxlen = targets.shape
         parent_scores = self(val_batch)
+        score_clone = torch.clone(parent_scores)
 
-        #total_loss = self.loss_function(
-        #    parent_scores,
-        #    batch['lengths'],
-        #    targets
-        #)
+        total_loss = self.loss_function(
+            parent_scores,
+            val_batch['lengths'],
+            torch.clone(targets),
+        )
 
-        total_loss = self.alt_loss(
-            parent_scores.reshape((batch * maxlen), maxlen),
+        alt_loss = self.alt_loss(
+            score_clone.reshape((batch * maxlen), maxlen),
             targets.reshape((batch * maxlen,))
         )
 
@@ -203,23 +216,21 @@ class LitLSTM(pl.LightningModule):
         total += torch.count_nonzero((targets == targets)* (targets != -100))
 
         #self.log("train_loss", total_loss, on_step=True, on_epoch=True, prog_bar=True, logger=True)
-
-        return {'loss': total_loss, 'correct': num_correct, 'total': total}
+        
+        return {'loss': total_loss, 'correct': num_correct, 'total': total, 'alt_loss':alt_loss}
 
     def validation_epoch_end(self, preds):
         correct = 0
         total = 0
         loss = 0
-
+        alt_loss = 0.0
         for pred in preds:
             correct += pred['correct']
             total += pred['total']
             loss += pred['loss']
+            alt_loss += pred['alt_loss'] / len(preds)
 
-        self.log('accuracy', correct / total)
-        self.log('loss', loss/len(preds))
-
-        print('Accuracy on validation set: {} | Loss on validation set: {}'.format(correct/total, loss/len(preds)))
+        print('\nAccuracy on validation set: {:3.3f} | Loss on validation set: {:3.3f} | Cross Entropy: {:3.3f}'.format(correct/total, loss/len(preds), alt_loss))
         return {'accuracy': correct / total, 'loss': loss/len(preds)}
 
     def test_step(self, batch, batch_idx):

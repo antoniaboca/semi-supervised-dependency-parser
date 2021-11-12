@@ -16,11 +16,11 @@ model = LitLSTM(embeddings, EMBEDDING_DIM, HIDDEN_DIM, NUM_LAYERS, DROPOUT, ARC_
 trainer = pl.Trainer(max_epochs=NUM_EPOCH)
 trainer.fit(model, module.train_dataloader, module.dev_dataloader)
 
-#import matplotlib.pyplot as plt
+import matplotlib.pyplot as plt
 
-#plt.plot(loss_fn)
-#plt.show()
+plt.plot(model.log_loss)
+plt.show()
 
 print('TESTING...')
-results = trainer.test(model, module.dev_dataloader, verbose=True)
+results = trainer.test(model, module.test_dataloader, verbose=True)
 print(results)

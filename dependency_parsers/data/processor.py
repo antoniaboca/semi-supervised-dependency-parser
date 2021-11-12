@@ -30,7 +30,7 @@ class SentenceDataset(Dataset):
 
         count = 0
         for sentence in data:
-            # if len(sentence) > 20:
+            # if len(sentence) > 10:
             #    continue
             word_list = [ROOT_TOKEN]
             tag_list = [ROOT_TAG]
