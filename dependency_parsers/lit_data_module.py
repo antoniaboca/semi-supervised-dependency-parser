@@ -21,6 +21,7 @@ class DataModule(pl.LightningDataModule):
         with open(PARAM_FILE, 'rb') as file:
             dict = pickle.load(file)
         self.TAGSET_SIZE = dict['TAGSET_SIZE']
+        self.LABSET_SIZE = dict['LABSET_SIZE']
 
     def dev_dataloader(self):
         return self.dev_dataloader

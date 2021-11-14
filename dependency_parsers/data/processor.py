@@ -16,7 +16,7 @@ class SentenceDataset(Dataset):
         
         words = {}
         pos_tags = {}
-        dep_rel = {}
+        label = {}
 
         data = pyconll.load_from_file(file)
         
@@ -26,7 +26,6 @@ class SentenceDataset(Dataset):
         self.sentences = []
         self.parent_ids = []
         self.dep_indexes = []
-        self.deps_list = []
 
         count = 0
         for sentence in data:
@@ -35,7 +34,7 @@ class SentenceDataset(Dataset):
             word_list = [ROOT_TOKEN]
             tag_list = [ROOT_TAG]
             parents = [0]
-            deps = [ROOT_LABEL]
+            labels = [ROOT_LABEL]
 
             count += 1
             if count > max_size:
@@ -64,31 +63,23 @@ class SentenceDataset(Dataset):
                     pos_tags[token.upos] = 1
                 tag_list.append(token.upos)
 
-                if token.deprel is None:
-                    continue
-                if token.deprel in dep_rel:
-                    dep_rel[token.deprel] += 1
+                if token.deprel in label:
+                    label[token.deprel] += 1
                 else:
-                    dep_rel[token.deprel] = 1
+                    label[token.deprel] = 1
                 
-                deps.append(token.deprel)
+                labels.append(token.deprel)
                 
             
-            self.sentences.append((word_list, tag_list, parents))
+            self.sentences.append((word_list, tag_list, parents, labels))
             self.parent_ids.append(parents)
-            self.deps_list.append(deps)
 
         if vocab is None:
             self.vocabulary = Vocabulary(
                 counter={
                     'words': words, 
                     'pos_tag': pos_tags, 
-                    'dep_rel': dep_rel
-                    },
-                tokens_to_add={
-                    'words': [ROOT_TOKEN], 
-                    'pos_tag': [ROOT_TAG],
-                    'dep_rel': [ROOT_LABEL]
+                    'label': label
                     }
             )
 
@@ -97,28 +88,26 @@ class SentenceDataset(Dataset):
 
         self.index_to_word = self.vocabulary.get_index_to_token_vocabulary(namespace='words')
         self.index_to_pos = self.vocabulary.get_index_to_token_vocabulary(namespace='pos_tag')
-        self.index_to_dep = self.vocabulary.get_index_to_token_vocabulary(namespace='dep_rel')
+        self.index_to_label = self.vocabulary.get_index_to_token_vocabulary(namespace='label')
 
         self.word_to_index = self.vocabulary.get_token_to_index_vocabulary(namespace='words')
         self.pos_to_index = self.vocabulary.get_token_to_index_vocabulary(namespace='pos_tag')
-        self.dep_to_index = self.vocabulary.get_token_to_index_vocabulary(namespace='dep_rel')
+        self.label_to_index = self.vocabulary.get_token_to_index_vocabulary(namespace='label')
 
         self.index_set = []
         self.tag_set = []
         self.parent_set = []
+        self.label_set = []
 
-        for sentence, tags, parents in self.sentences:
+        for sentence, tags, parents, labels in self.sentences:
             sidxs = [self.vocabulary.get_token_index(w, 'words') for w in sentence]
             tidxs = [self.vocabulary.get_token_index(t, 'pos_tag') for t in tags]
+            lidxs = [self.vocabulary.get_token_index(l, 'label') for l in labels]
 
             self.index_set.append(sidxs)
             self.tag_set.append(tidxs)
             self.parent_set.append(parents)
-        
-        for deps in self.deps_list:
-            didxs = [self.vocabulary.get_token_index(d, 'dep_rel') for d in deps]
-
-            self.dep_indexes.append(didxs)
+            self.label_set.append(lidxs)
 
     def __len__(self):
         return len(self.index_set)
@@ -127,7 +116,13 @@ class SentenceDataset(Dataset):
         if torch.is_tensor(index):
             index = index.tolist()
 
-        sample = (self.index_set[index], self.tag_set[index], self.parent_set[index])
+        sample = (
+            self.index_set[index], 
+            self.tag_set[index], 
+            self.parent_set[index], 
+            self.label_set[index]
+        )
+
         if self.transform:
             sample = self.transform(sample)
         
@@ -138,6 +133,7 @@ class SentenceDataset(Dataset):
             print('Length {} for {}'.format(len(self.sentences[index][0]), self.sentences[index][0]))
             print('Length {} for {}'.format(len(self.index_set[index]), self.index_set[index]))
             print('Length {} for {}'.format(len(self.parent_set[index]), self.parent_set[index]))
+            print('Length {} for {}'.format(len(self.label_set[index]), self.label_set[index]))
             raise AssertionError
 
         return sample
@@ -200,33 +196,29 @@ class Embed(object):
 
 def collate_fn_padder(samples):
     # batch of samples to be expected to look like
-    # [(index_sent1, embed_sent1, tag_set1, parent_set1), ...]
+    # [(index_sent1, tag_set1, parent_set1, label_set1), ...]
 
     #import ipdb; ipdb.set_trace()
-    indexes, tags, parents = zip(*samples)
-
-    # indexes, embeds, tags, parents = zip(*samples)
+    indexes, tags, parents, labels = zip(*samples)
 
     sent_lens = torch.tensor([len(sent) for sent in indexes])
 
     indexes = [torch.tensor(sent) for sent in indexes]
-    # embeds = [torch.tensor(embed) for embed in embeds]
     tags = [torch.tensor(tag) for tag in tags]
     parents = [torch.tensor(parent) for parent in parents]
+    labels = [torch.tensor(label) for label in labels]
 
     padded_sent = pad_sequence(indexes, batch_first=True, padding_value=0)
-    # padded_embeds = pad_sequence(embeds, batch_first=True, padding_value=0.0)
     padded_tags = pad_sequence(tags, batch_first=True, padding_value=0)
-    padded_parents = pad_sequence(parents, batch_first=True, padding_value=PAD_VALUE)
-
-    #assert len(padded_parents[0]) == len(padded_embeds[0])
+    padded_parents = pad_sequence(parents, batch_first=True, padding_value=0)
+    padded_labels = pad_sequence(labels, batch_first=True, padding_value=0)
 
     return {
         'sentence': padded_sent, 
-        #'embedding': padded_embeds, 
         'tags': padded_tags, 
         'parents': padded_parents, 
-        'lengths': sent_lens
+        'lengths': sent_lens,
+        'labels': padded_labels,
     }
 
 

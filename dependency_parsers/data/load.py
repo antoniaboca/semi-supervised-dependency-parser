@@ -20,7 +20,7 @@ dev_set = SentenceDataset(UD_ENGLISH_EWT_DEV, ROOT_TOKEN, ROOT_TAG, ROOT_LABEL,v
 print('Loaded the dev set. Number of sentences: {}'.format(len(dev_set.sentences)))
 
 # training_set.transform = Embed(embeddings)
-embedded_set = [training_set[idx] for idx in range(len(training_set))] # now this set is a list of (sentence, embedding, tags, parent)
+embedded_set = [training_set[idx] for idx in range(len(training_set))] # now this set is a list of (sentence, tags, parent, label)
 
 # test_set.transform = Embed(embeddings)
 embed_test_set = [test_set[idx] for idx in range(len(test_set))]
@@ -35,6 +35,9 @@ print('Saved.')
 
 print('Save other size parameters...')
 with open(PARAM_FILE, 'wb') as file:
-    pickle.dump({'TAGSET_SIZE': len(training_set.pos_to_index)}, file)
+    pickle.dump({
+        'TAGSET_SIZE': len(training_set.pos_to_index), 
+        'LABSET_SIZE': len(training_set.label_to_index)
+        }, file)
 print('Saved.')
 

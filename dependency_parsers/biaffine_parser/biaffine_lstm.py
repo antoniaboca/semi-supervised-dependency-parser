@@ -6,25 +6,29 @@ import torch.nn.functional as F
 import torch.optim as optim
 import torch.nn.functional as F
 
-from torch.nn.utils.rnn import pad_sequence, pad_packed_sequence, pack_padded_sequence
+from torch.nn.utils.rnn import pad_packed_sequence, pack_padded_sequence
 from torch.nn import Linear, LSTM
 
 import pytorch_lightning as pl
 
 class Biaffine(nn.Module):
-    def __init__(self, hidden_dim, arc_dim):
+    def __init__(self, arc_dim, output_dim):
         super().__init__()
 
-        self.W = nn.Parameter(torch.Tensor(arc_dim, arc_dim))
+        self.W = nn.Parameter(torch.Tensor(output_dim, arc_dim, arc_dim))
         self.reset_parameters()
 
-    def forward(self, head, dep, head_score, dep_score, mask):
-        dep_scores = torch.matmul(head, self.W)
-        dep_scores = torch.bmm(dep_scores, dep.transpose(1, 2))
-        dep_scores += head_score + dep_score.transpose(1, 2)
+    def forward(self, head, dep):
+        # head = [batch][sentence length][arc_dim][]
+        head = head.unsqueeze(1)
+        dep = dep.unsqueeze(1)
 
-        mask = torch.bmm(mask.unsqueeze(2).int(), mask.unsqueeze(1).int()).bool()
-
+        # scores = torch.matmul(head, self.W)
+        #scores = torch.matmul(scores, dep.transpose(-1, -2))
+        
+        scores = head @ self.W @ dep.transpose(-1,-2)
+        # mask = torch.bmm(mask.unsqueeze(2).int(), mask.unsqueeze(1).int()).bool()
+    
         # set the scores of arcs incoming to root
         #dep_scores[:, :, 0] = float('-inf')
         # set the scores of self loops n
@@ -32,16 +36,17 @@ class Biaffine(nn.Module):
 
         #dep_scores[~mask] = float('-inf')
 
-        return dep_scores
+        return scores.squeeze(1)
 
     def reset_parameters(self):
         nn.init.xavier_uniform_(self.W)
 
 class LitLSTM(pl.LightningModule):
-    def __init__(self, embeddings, embedding_dim, hidden_dim, num_layers, dropout, arc_dim):
+    def __init__(self, embeddings, embedding_dim, hidden_dim, num_layers, dropout, arc_dim, lab_dim, num_labels, loss_arg):
         super().__init__()
         self.hidden_dim = hidden_dim
         self.arc_dim = arc_dim
+        self.lab_dim = lab_dim
 
         self.lstm = LSTM(
             input_size=embedding_dim, 
@@ -53,17 +58,197 @@ class LitLSTM(pl.LightningModule):
 
         self.word_embedding = nn.Embedding.from_pretrained(torch.tensor(embeddings), padding_idx=0)
 
-        self.hidden2head = Linear(hidden_dim * 2, arc_dim) # this is your g
-        self.hidden2dep  = Linear(hidden_dim * 2, arc_dim) # this is your f
+        # arc linear layer
+        self.arc_linear_h = Linear(hidden_dim * 2, arc_dim) # this is your g
+        self.arc_linear_d = Linear(hidden_dim * 2, arc_dim) # this is your f
 
-        self.head_score = Linear(arc_dim, 1)
-        self.dep_score = Linear(arc_dim, 1)
+        #label linear layer 
+        self.lab_linear_h = Linear(hidden_dim * 2, lab_dim)
+        self.lab_linear_d = Linear(hidden_dim * 2, lab_dim)
 
-        self.biaffine    = Biaffine(hidden_dim, arc_dim)
+        #arc scores
+        self.arc_score_h = Linear(arc_dim, 1)
+        self.arc_score_d = Linear(arc_dim, 1)
 
-        self.alt_loss = nn.CrossEntropyLoss(ignore_index=-100)
+        #lab scores
+        self.lab_score_h = Linear(lab_dim, num_labels)
+        self.lab_score_d = Linear(lab_dim, num_labels)
+
+        # biaffine layers
+        self.arc_biaffine = Biaffine(arc_dim, 1)
+        self.lab_biaffine = Biaffine(lab_dim, num_labels)
+
+        if loss_arg == 'cross':
+            self.loss = nn.CrossEntropyLoss(ignore_index=0)
+        elif loss_arg == 'mtt':
+            self.loss = self.loss_function
 
         self.log_loss = []
+
+    def forward(self, x):
+        lengths = x['lengths']
+
+        # Ran: You can make your mask here using sent_lens. The following should do the trick:
+        embedding = self.word_embedding(x['sentence'])
+        maxlen = embedding.shape[1]
+
+        mask = torch.arange(maxlen).expand(len(lengths), maxlen) < lengths.unsqueeze(1)
+        
+        embd_input = pack_padded_sequence(embedding, lengths, batch_first=True, enforce_sorted=False)
+        
+        lstm_out, _ = self.lstm(embd_input.float())
+        lstm_out, _ = pad_packed_sequence(lstm_out, batch_first=True)
+        
+        # arcs
+        h_arc = F.relu(self.arc_linear_h(lstm_out))
+        d_arc = F.relu(self.arc_linear_d(lstm_out))
+
+        # labels
+        h_lab = F.relu(self.lab_linear_h(lstm_out))
+        d_lab = F.relu(self.lab_linear_d(lstm_out))
+
+        # arc scores
+        h_score_arc = self.arc_score_h(h_arc)
+        d_score_arc = self.arc_score_d(d_arc)
+
+        # label scores
+        h_score_lab = self.lab_score_h(h_lab)
+        d_score_lab = self.lab_score_d(d_lab)
+
+        arc_scores = self.arc_biaffine(h_arc, d_arc) + h_score_arc + d_score_arc.transpose(1, 2)
+        lab_scores = self.lab_biaffine(h_lab, d_lab)
+
+        return arc_scores, lab_scores
+
+    def configure_optimizers(self):
+        optimizer = optim.Adam(self.parameters(), lr=2e-3)
+        return optimizer
+    
+    def training_step(self, train_batch, batch_idx):
+        parents = train_batch['parents']
+        # parents[:, 0] = -100                # we are not interested in the parent of the ROOT TOKEN
+
+        labels = train_batch['labels']
+
+        arc_scores, lab_scores = self(train_batch)
+
+        batch, maxlen, _ = arc_scores.shape
+        lengths = train_batch['lengths']
+
+        pads = torch.arange(maxlen) >= lengths.unsqueeze(1)
+        rows = pads.unsqueeze(-1).expand((batch, maxlen, maxlen))
+
+        #total_loss = self.alt_loss(
+        #    parent_scores.reshape((batch * maxlen), maxlen),
+        #    targets.reshape((batch * maxlen,))
+        #)
+        arc_loss = self.loss(
+            arc_scores.reshape((batch * maxlen), maxlen),
+            parents.reshape((batch * maxlen,))
+        )
+
+        # mask = parents == -100
+        #_p = torch.clone(parents)
+        #_p[mask] = 0.0
+        lab_loss = self.lab_loss(lab_scores, parents, labels)
+
+        total_loss = arc_loss + lab_loss
+        targets = torch.argmax(arc_scores, dim=2)
+
+        num_correct = 0
+        total = 0
+
+        num_correct += torch.count_nonzero((targets == parents) * (parents != -100))
+        total += torch.count_nonzero((parents == parents) * (parents != -100))
+
+        return {'loss': total_loss, 'correct': num_correct, 'total': total, 'arc_loss': arc_loss.detach(), 'lab_loss': lab_loss.detach()}
+
+    def training_epoch_end(self, outputs):
+        correct = 0
+        total = 0
+        loss = 0.0
+        arc_loss = 0.0
+        lab_loss = 0.0
+        for output in outputs:
+            correct += output['correct']
+            total += output['total']
+            loss += output['loss'] / len(outputs)
+            arc_loss += output['arc_loss'] / len(outputs)
+            lab_loss += output['lab_loss'] / len(outputs)
+        
+        self.log_loss.append(loss)
+        print('\nAccuracy after epoch end: {:3.3f} | Arc loss: {:3.3f} | Lab loss: {:3.3f}'.format(correct/total, arc_loss, lab_loss))
+
+    def validation_step(self, val_batch, batch_idx):
+        targets = val_batch['parents']
+        labels = val_batch['labels']
+        # targets[:, 0] = -100
+
+        batch, maxlen = targets.shape
+        arc_scores, lab_scores = self(val_batch)
+        # score_clone = torch.clone(arc_scores)
+
+        # total_loss = self.loss_function(
+        #    parent_scores,
+        #    val_batch['lengths'],
+        #    torch.clone(targets),
+        #)
+
+        arc_loss = self.loss(
+            arc_scores.reshape((batch * maxlen), maxlen),
+            targets.reshape((batch * maxlen,))
+        )
+
+        #mask = targets == -100
+        #_t = torch.clone(targets)
+        #_t[mask] = 0
+        lab_loss = self.lab_loss(lab_scores, targets, labels)
+        parents = torch.argmax(arc_scores, dim=2)
+
+        total_loss = arc_loss + lab_loss
+        num_correct = 0
+        total = 0
+
+        num_correct += torch.count_nonzero((parents == targets) * (targets != -100))
+        total += torch.count_nonzero((targets == targets)* (targets != -100))
+
+        #self.log("train_loss", total_loss, on_step=True, on_epoch=True, prog_bar=True, logger=True)
+        
+        return {'loss': total_loss, 'correct': num_correct, 'total': total, 'arc_loss':arc_loss.detach(), 'lab_loss': lab_loss.detach()}
+
+    def validation_epoch_end(self, preds):
+        correct = 0
+        total = 0
+        loss = 0
+        arc_loss = 0.0
+        lab_loss = 0.0
+        for pred in preds:
+            correct += pred['correct']
+            total += pred['total']
+            loss += pred['loss']
+            arc_loss += pred['arc_loss'] / len(preds)
+            lab_loss += pred['lab_loss'] / len(preds)
+
+        print('\nAccuracy on validation set: {:3.3f} | Loss on validation set: {:3.3f} | Arc loss: {:3.3f} | Lab loss: {:3.3f}'.format(correct/total, loss/len(preds), arc_loss, lab_loss))
+        return {'accuracy': correct / total, 'loss': loss/len(preds)}
+
+    def test_step(self, batch, batch_idx):
+        return dict(self.validation_step(batch, batch_idx))
+    
+    def test_epoch_end(self, preds):
+        return self.validation_epoch_end(preds)
+
+    def lab_loss(self, S_lab, heads, labels):
+        """Compute the loss for the label predictions on the gold arcs (heads)."""
+        heads = heads.unsqueeze(1).unsqueeze(2)              # [batch, 1, 1, sent_len]
+        heads = heads.expand(-1, S_lab.size(1), -1, -1)      # [batch, n_labels, 1, sent_len]
+        S_lab = torch.gather(S_lab, 2, heads).squeeze(2)     # [batch, n_labels, sent_len]
+        S_lab = S_lab.transpose(-1, -2)                      # [batch, sent_len, n_labels]
+        S_lab = S_lab.contiguous().view(-1, S_lab.size(-1))  # [batch*sent_len, n_labels]
+        labels = labels.view(-1)                             # [batch*sent_len]
+        return self.loss(S_lab, labels)
+
+
     def loss_function(self, parent_scores, lengths, targets):
         batch, maxlen, _ = parent_scores.shape
 
@@ -119,126 +304,6 @@ class LitLSTM(pl.LightningModule):
             import ipdb
             ipdb.post_mortem()
         return P.mean()
-
-    def forward(self, x):
-        
-        sent_lens = x['lengths']
-
-        # Ran: You can make your mask here using sent_lens. The following should do the trick:
-        embedding = self.word_embedding(x['sentence'])
-        max_len = embedding.shape[1]
-        mask = torch.arange(max_len).expand(len(sent_lens), max_len) < sent_lens.unsqueeze(1)
-        
-        embd_input = pack_padded_sequence(embedding, sent_lens, batch_first=True, enforce_sorted=False)
-        
-        lstm_out, _ = self.lstm(embd_input.float())
-        lstm_out, _ = pad_packed_sequence(lstm_out, batch_first=True)
-
-        head = F.relu(self.hidden2head(lstm_out))
-        dep  = F.relu(self.hidden2dep(lstm_out))
-
-        dep_scores = self.biaffine(head, dep, self.head_score(head), self.dep_score(dep), mask)
-        return dep_scores
-
-    def configure_optimizers(self):
-        optimizer = optim.Adam(self.parameters(), lr=2e-3)
-        return optimizer
-    
-    def training_step(self, train_batch, batch_idx):
-        targets = train_batch['parents']
-        targets[:, 0] = -100                # we are not interested in the parent of the ROOT TOKEN
-
-        parent_scores = self(train_batch)
-
-        batch, maxlen, _ = parent_scores.shape
-        lengths = train_batch['lengths']
-
-        pads = torch.arange(maxlen) >= lengths.unsqueeze(1)
-        rows = pads.unsqueeze(-1).expand((batch, maxlen, maxlen))
-
-        #total_loss = self.alt_loss(
-        #    parent_scores.reshape((batch * maxlen), maxlen),
-        #    targets.reshape((batch * maxlen,))
-        #)
-        total_loss = self.loss_function(
-            parent_scores,
-            train_batch['lengths'],
-            torch.clone(targets)
-        )
-
-        parents = torch.argmax(parent_scores, dim=2)
-
-        num_correct = 0
-        total = 0
-
-        num_correct += torch.count_nonzero((parents == targets) * (targets != -100))
-        total += torch.count_nonzero((targets == targets) * (targets != -100))
-
-        return {'loss': total_loss, 'correct': num_correct, 'total': total}
-
-    def training_epoch_end(self, outputs):
-        correct = 0
-        total = 0
-        loss = 0.0
-        for output in outputs:
-            correct += output['correct']
-            total += output['total']
-            loss += output['loss'] / len(outputs)
-        
-        self.log_loss.append(loss)
-        print('\nAccuracy after epoch end: {:3.3f}'.format(correct/total))
-
-    def validation_step(self, val_batch, batch_idx):
-        targets = val_batch['parents']
-        targets[:, 0] = -100
-
-        batch, maxlen = targets.shape
-        parent_scores = self(val_batch)
-        score_clone = torch.clone(parent_scores)
-
-        total_loss = self.loss_function(
-            parent_scores,
-            val_batch['lengths'],
-            torch.clone(targets),
-        )
-
-        alt_loss = self.alt_loss(
-            score_clone.reshape((batch * maxlen), maxlen),
-            targets.reshape((batch * maxlen,))
-        )
-
-        parents = torch.argmax(parent_scores, dim=2)
-
-        num_correct = 0
-        total = 0
-
-        num_correct += torch.count_nonzero((parents == targets) * (targets != -100))
-        total += torch.count_nonzero((targets == targets)* (targets != -100))
-
-        #self.log("train_loss", total_loss, on_step=True, on_epoch=True, prog_bar=True, logger=True)
-        
-        return {'loss': total_loss, 'correct': num_correct, 'total': total, 'alt_loss':alt_loss}
-
-    def validation_epoch_end(self, preds):
-        correct = 0
-        total = 0
-        loss = 0
-        alt_loss = 0.0
-        for pred in preds:
-            correct += pred['correct']
-            total += pred['total']
-            loss += pred['loss']
-            alt_loss += pred['alt_loss'] / len(preds)
-
-        print('\nAccuracy on validation set: {:3.3f} | Loss on validation set: {:3.3f} | Cross Entropy: {:3.3f}'.format(correct/total, loss/len(preds), alt_loss))
-        return {'accuracy': correct / total, 'loss': loss/len(preds)}
-
-    def test_step(self, batch, batch_idx):
-        return dict(self.validation_step(batch, batch_idx))
-    
-    def test_epoch_end(self, preds):
-        return self.validation_epoch_end(preds)
-
 
     def log_partition(self, scores, length):
         batch, slen, slen_ = scores.shape
