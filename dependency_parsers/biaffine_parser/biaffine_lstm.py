@@ -71,8 +71,8 @@ class LitLSTM(pl.LightningModule):
         self.arc_score_d = Linear(arc_dim, 1)
 
         #lab scores
-        self.lab_score_h = Linear(lab_dim, num_labels)
-        self.lab_score_d = Linear(lab_dim, num_labels)
+        #self.lab_score_h = Linear(lab_dim, num_labels)
+        #self.lab_score_d = Linear(lab_dim, num_labels)
 
         # biaffine layers
         self.arc_biaffine = Biaffine(arc_dim, 1)
@@ -112,8 +112,8 @@ class LitLSTM(pl.LightningModule):
         d_score_arc = self.arc_score_d(d_arc)
 
         # label scores
-        h_score_lab = self.lab_score_h(h_lab)
-        d_score_lab = self.lab_score_d(d_lab)
+        #h_score_lab = self.lab_score_h(h_lab)
+        #d_score_lab = self.lab_score_d(d_lab)
 
         arc_scores = self.arc_biaffine(h_arc, d_arc) + h_score_arc + d_score_arc.transpose(1, 2)
         lab_scores = self.lab_biaffine(h_lab, d_lab)
@@ -142,10 +142,7 @@ class LitLSTM(pl.LightningModule):
         #    parent_scores.reshape((batch * maxlen), maxlen),
         #    targets.reshape((batch * maxlen,))
         #)
-        arc_loss = self.loss(
-            arc_scores.reshape((batch * maxlen), maxlen),
-            parents.reshape((batch * maxlen,))
-        )
+        arc_loss = self.arc_loss(arc_scores, parents)
 
         # mask = parents == -100
         #_p = torch.clone(parents)
@@ -158,8 +155,8 @@ class LitLSTM(pl.LightningModule):
         num_correct = 0
         total = 0
 
-        num_correct += torch.count_nonzero((targets == parents) * (parents != -100))
-        total += torch.count_nonzero((parents == parents) * (parents != -100))
+        num_correct += torch.count_nonzero((targets == parents) * (parents != 0))
+        total += torch.count_nonzero((parents == parents) * (parents != 0))
 
         return {'loss': total_loss, 'correct': num_correct, 'total': total, 'arc_loss': arc_loss.detach(), 'lab_loss': lab_loss.detach()}
 
@@ -194,7 +191,7 @@ class LitLSTM(pl.LightningModule):
         #    torch.clone(targets),
         #)
 
-        arc_loss = self.loss(
+        arc_loss = self.arc_loss(
             arc_scores.reshape((batch * maxlen), maxlen),
             targets.reshape((batch * maxlen,))
         )
@@ -209,8 +206,8 @@ class LitLSTM(pl.LightningModule):
         num_correct = 0
         total = 0
 
-        num_correct += torch.count_nonzero((parents == targets) * (targets != -100))
-        total += torch.count_nonzero((targets == targets)* (targets != -100))
+        num_correct += torch.count_nonzero((parents == targets) * (targets != 0))
+        total += torch.count_nonzero((targets == targets)* (targets != 0))
 
         #self.log("train_loss", total_loss, on_step=True, on_epoch=True, prog_bar=True, logger=True)
         
@@ -247,6 +244,13 @@ class LitLSTM(pl.LightningModule):
         S_lab = S_lab.contiguous().view(-1, S_lab.size(-1))  # [batch*sent_len, n_labels]
         labels = labels.view(-1)                             # [batch*sent_len]
         return self.loss(S_lab, labels)
+
+    def arc_loss(self, S_arc, heads):
+        """Compute the loss for the arc predictions."""
+        #S_arc = S_arc.transpose(-1, -2)                      # [batch, sent_len, sent_len]
+        S_arc = S_arc.contiguous().view(-1, S_arc.size(-1))  # [batch*sent_len, sent_len]
+        heads = heads.view(-1)                               # [batch*sent_len]
+        return self.loss(S_arc, heads)
 
 
     def loss_function(self, parent_scores, lengths, targets):
