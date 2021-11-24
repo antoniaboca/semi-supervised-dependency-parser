@@ -1,3 +1,5 @@
+from torch._C import set_flush_denormal
+from torch.nn.modules import linear
 import torchmetrics
 
 import torch
@@ -9,6 +11,9 @@ import torch.nn.functional as F
 from torch.nn.utils.rnn import pad_packed_sequence, pack_padded_sequence
 from torch.nn import Linear, LSTM
 
+from torch_struct import NonProjectiveDependencyCRF
+
+
 import pytorch_lightning as pl
 
 class Biaffine(nn.Module):
@@ -19,47 +24,40 @@ class Biaffine(nn.Module):
         self.reset_parameters()
 
     def forward(self, head, dep):
-        # head = [batch][sentence length][arc_dim][]
         head = head.unsqueeze(1)
         dep = dep.unsqueeze(1)
 
-        # scores = torch.matmul(head, self.W)
-        #scores = torch.matmul(scores, dep.transpose(-1, -2))
-        
         scores = head @ self.W @ dep.transpose(-1,-2)
-        # mask = torch.bmm(mask.unsqueeze(2).int(), mask.unsqueeze(1).int()).bool()
-    
-        # set the scores of arcs incoming to root
-        #dep_scores[:, :, 0] = float('-inf')
-        # set the scores of self loops n
-        #dep_scores.masked_fill_(torch.eye(dep_scores.size(1)).bool(), float('-inf'))
-
-        #dep_scores[~mask] = float('-inf')
-
         return scores.squeeze(1)
 
     def reset_parameters(self):
         nn.init.xavier_uniform_(self.W)
 
 class LitLSTM(pl.LightningModule):
-    def __init__(self, embeddings, embedding_dim, hidden_dim, num_layers, dropout, arc_dim, lab_dim, num_labels, loss_arg):
+    def __init__(self, embeddings, embedding_dim, hidden_dim, num_layers, 
+                lstm_dropout, linear_dropout, arc_dim, lab_dim, num_labels, lr, loss_arg):
         super().__init__()
         self.hidden_dim = hidden_dim
         self.arc_dim = arc_dim
         self.lab_dim = lab_dim
+        self.lr = lr
 
         self.lstm = LSTM(
             input_size=embedding_dim, 
             hidden_size=hidden_dim,
             num_layers=num_layers,
-            dropout=dropout,
+            dropout=lstm_dropout,
             bidirectional=True
         )
 
-        self.word_embedding = nn.Embedding.from_pretrained(torch.tensor(embeddings), padding_idx=0)
+        self.word_embedding = nn.Embedding.from_pretrained(torch.tensor(embeddings), 
+                                                            padding_idx=0)
 
+        # dropout layer
+        self.dropout = nn.Dropout(linear_dropout)
+        
         # arc linear layer
-        self.arc_linear_h = Linear(hidden_dim * 2, arc_dim) # this is your g
+        self.arc_linear_h = Linear(hidden_dim * 2, arc_dim)  # this is your g
         self.arc_linear_d = Linear(hidden_dim * 2, arc_dim) # this is your f
 
         #label linear layer 
@@ -71,8 +69,8 @@ class LitLSTM(pl.LightningModule):
         self.arc_score_d = Linear(arc_dim, 1)
 
         #lab scores
-        #self.lab_score_h = Linear(lab_dim, num_labels)
-        #self.lab_score_d = Linear(lab_dim, num_labels)
+        self.lab_score_h = Linear(lab_dim, num_labels)
+        self.lab_score_d = Linear(lab_dim, num_labels)
 
         # biaffine layers
         self.arc_biaffine = Biaffine(arc_dim, 1)
@@ -84,15 +82,18 @@ class LitLSTM(pl.LightningModule):
             self.loss = self.loss_function
 
         self.log_loss = []
-
+    
+    def configure_optimizers(self):
+        optimizer = optim.Adam(self.parameters(), lr=self.lr)
+        return optimizer
+    
     def forward(self, x):
         lengths = x['lengths']
 
-        # Ran: You can make your mask here using sent_lens. The following should do the trick:
         embedding = self.word_embedding(x['sentence'])
         maxlen = embedding.shape[1]
 
-        mask = torch.arange(maxlen).expand(len(lengths), maxlen) < lengths.unsqueeze(1)
+        # mask = torch.arange(maxlen).expand(len(lengths), maxlen) < lengths.unsqueeze(1)
         
         embd_input = pack_padded_sequence(embedding, lengths, batch_first=True, enforce_sorted=False)
         
@@ -100,12 +101,12 @@ class LitLSTM(pl.LightningModule):
         lstm_out, _ = pad_packed_sequence(lstm_out, batch_first=True)
         
         # arcs
-        h_arc = F.relu(self.arc_linear_h(lstm_out))
-        d_arc = F.relu(self.arc_linear_d(lstm_out))
+        h_arc = self.dropout(F.relu(self.arc_linear_h(lstm_out)))
+        d_arc = self.dropout(F.relu(self.arc_linear_d(lstm_out)))
 
         # labels
-        h_lab = F.relu(self.lab_linear_h(lstm_out))
-        d_lab = F.relu(self.lab_linear_d(lstm_out))
+        h_lab = self.dropout(F.relu(self.lab_linear_h(lstm_out)))
+        d_lab = self.dropout(F.relu(self.lab_linear_d(lstm_out)))
 
         # arc scores
         h_score_arc = self.arc_score_h(h_arc)
@@ -119,34 +120,16 @@ class LitLSTM(pl.LightningModule):
         lab_scores = self.lab_biaffine(h_lab, d_lab)
 
         return arc_scores, lab_scores
-
-    def configure_optimizers(self):
-        optimizer = optim.Adam(self.parameters(), lr=2e-3)
-        return optimizer
-    
+        
     def training_step(self, train_batch, batch_idx):
         parents = train_batch['parents']
-        # parents[:, 0] = -100                # we are not interested in the parent of the ROOT TOKEN
-
         labels = train_batch['labels']
 
         arc_scores, lab_scores = self(train_batch)
-
         batch, maxlen, _ = arc_scores.shape
         lengths = train_batch['lengths']
 
-        pads = torch.arange(maxlen) >= lengths.unsqueeze(1)
-        rows = pads.unsqueeze(-1).expand((batch, maxlen, maxlen))
-
-        #total_loss = self.alt_loss(
-        #    parent_scores.reshape((batch * maxlen), maxlen),
-        #    targets.reshape((batch * maxlen,))
-        #)
         arc_loss = self.arc_loss(arc_scores, parents)
-
-        # mask = parents == -100
-        #_p = torch.clone(parents)
-        #_p[mask] = 0.0
         lab_loss = self.lab_loss(lab_scores, parents, labels)
 
         total_loss = arc_loss + lab_loss
@@ -158,8 +141,13 @@ class LitLSTM(pl.LightningModule):
         num_correct += torch.count_nonzero((targets == parents) * (parents != 0))
         total += torch.count_nonzero((parents == parents) * (parents != 0))
 
-        return {'loss': total_loss, 'correct': num_correct, 'total': total, 'arc_loss': arc_loss.detach(), 'lab_loss': lab_loss.detach()}
-
+        return {'loss': total_loss, 
+                'correct': num_correct, 
+                'total': total, 
+                'arc_loss': arc_loss.detach(), 
+                'lab_loss': lab_loss.detach()
+        }
+        
     def training_epoch_end(self, outputs):
         correct = 0
         total = 0
@@ -174,43 +162,26 @@ class LitLSTM(pl.LightningModule):
             lab_loss += output['lab_loss'] / len(outputs)
         
         self.log_loss.append(loss)
-        print('\nAccuracy after epoch end: {:3.3f} | Arc loss: {:3.3f} | Lab loss: {:3.3f}'.format(correct/total, arc_loss, lab_loss))
+        print('\nAccuracy after epoch end: {:3.3f} | Arc loss: {:3.3f} | Lab loss: {:3.3f}'.format(correct/total, arc_loss.detach(), lab_loss.detach()))
 
     def validation_step(self, val_batch, batch_idx):
         targets = val_batch['parents']
         labels = val_batch['labels']
-        # targets[:, 0] = -100
-
+        
         batch, maxlen = targets.shape
         arc_scores, lab_scores = self(val_batch)
-        # score_clone = torch.clone(arc_scores)
 
-        # total_loss = self.loss_function(
-        #    parent_scores,
-        #    val_batch['lengths'],
-        #    torch.clone(targets),
-        #)
-
-        arc_loss = self.arc_loss(
-            arc_scores.reshape((batch * maxlen), maxlen),
-            targets.reshape((batch * maxlen,))
-        )
-
-        #mask = targets == -100
-        #_t = torch.clone(targets)
-        #_t[mask] = 0
+        arc_loss = self.arc_loss(arc_scores,targets)
         lab_loss = self.lab_loss(lab_scores, targets, labels)
-        parents = torch.argmax(arc_scores, dim=2)
 
         total_loss = arc_loss + lab_loss
         num_correct = 0
         total = 0
-
+        
+        parents = torch.argmax(arc_scores, dim=2)
         num_correct += torch.count_nonzero((parents == targets) * (targets != 0))
         total += torch.count_nonzero((targets == targets)* (targets != 0))
 
-        #self.log("train_loss", total_loss, on_step=True, on_epoch=True, prog_bar=True, logger=True)
-        
         return {'loss': total_loss, 'correct': num_correct, 'total': total, 'arc_loss':arc_loss.detach(), 'lab_loss': lab_loss.detach()}
 
     def validation_epoch_end(self, preds):
@@ -226,7 +197,7 @@ class LitLSTM(pl.LightningModule):
             arc_loss += pred['arc_loss'] / len(preds)
             lab_loss += pred['lab_loss'] / len(preds)
 
-        print('\nAccuracy on validation set: {:3.3f} | Loss on validation set: {:3.3f} | Arc loss: {:3.3f} | Lab loss: {:3.3f}'.format(correct/total, loss/len(preds), arc_loss, lab_loss))
+        print('\nAccuracy on validation set: {:3.3f} | Loss : {:3.3f} | Arc loss: {:3.3f} | Lab loss: {:3.3f}'.format(correct/total, loss/len(preds), arc_loss.detach(), lab_loss.detach()))
         return {'accuracy': correct / total, 'loss': loss/len(preds)}
 
     def test_step(self, batch, batch_idx):
@@ -251,7 +222,28 @@ class LitLSTM(pl.LightningModule):
         S_arc = S_arc.contiguous().view(-1, S_arc.size(-1))  # [batch*sent_len, sent_len]
         heads = heads.view(-1)                               # [batch*sent_len]
         return self.loss(S_arc, heads)
+    
+    def new_loss(self, arc_scores, lengths, targets):
+        batch, maxlen, _ = arc_scores.shape
+        S = NonProjectiveDependencyCRF(arc_scores, lengths)
 
+        S = S.reshape((batch * maxlen, maxlen))
+        valid = torch.reshape(targets, (batch * maxlen,))
+
+        offset = torch.arange(start=0, end=maxlen * batch, step=maxlen).unsqueeze(-1).expand(-1, maxlen).reshape((batch * maxlen,))
+        indexer = torch.arange(maxlen).repeat(batch, 1).reshape((batch*maxlen,))
+        assert valid.shape == indexer.shape
+        
+        valid = valid + offset
+
+        # get the sum of edges of each target tree in the batch
+        sums = S[valid, indexer].reshape(batch, maxlen)
+
+        # compute the negative log likelihood of each tree
+
+        P = sums.sum(dim=-1)
+
+        return P
 
     def loss_function(self, parent_scores, lengths, targets):
         batch, maxlen, _ = parent_scores.shape

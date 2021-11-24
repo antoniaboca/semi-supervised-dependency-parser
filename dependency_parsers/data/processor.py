@@ -11,7 +11,7 @@ PAD_VALUE = -100
 PAD_IDX = 0
 
 class SentenceDataset(Dataset):
-    def __init__(self, file, ROOT_TOKEN, ROOT_TAG, ROOT_LABEL, vocab=None, max_size=None, transform=None):
+    def __init__(self, file, ROOT_TOKEN, ROOT_TAG, ROOT_LABEL, vocab=None, transform=None, sentence_len=None):
         self.transform = transform
         
         words = {}
@@ -19,26 +19,19 @@ class SentenceDataset(Dataset):
         label = {}
 
         data = pyconll.load_from_file(file)
-        
-        if max_size is None:
-            max_size = len(data)
 
         self.sentences = []
         self.parent_ids = []
         self.dep_indexes = []
 
-        count = 0
         for sentence in data:
-            # if len(sentence) > 10:
-            #    continue
+            if sentence_len is not None and len(sentence) > sentence_len:
+                continue
+            
             word_list = [ROOT_TOKEN]
             tag_list = [ROOT_TAG]
             parents = [0]
             labels = [ROOT_LABEL]
-
-            count += 1
-            if count > max_size:
-                break
 
             for token in sentence:
                 if token.id.isdigit():
