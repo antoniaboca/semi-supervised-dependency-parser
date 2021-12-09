@@ -15,7 +15,7 @@ def main():
     model.add_argument('--lab-dim', type=int, default=128, help='label dimension of the biaffine layer')
     model.add_argument('--lstm-dropout', type=float, default=0.1)
     model.add_argument('--epochs', type=int, default=50, help='Number of epochs to train on')
-    model.add_argument('--lr', type=float, default=2e-3, help='Learning rate of the optimizer')
+    model.add_argument('--lr', type=float, default=1e-3, help='Learning rate of the optimizer')
     model.add_argument('--linear-dropout', type=float, default=0.1, help='Add dropout to the linear layers')
 
     data = parser.add_argument_group('Dataset size')
