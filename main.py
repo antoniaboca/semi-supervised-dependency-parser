@@ -1,11 +1,11 @@
 import argparse
-from dependency_parsers.lit_biaffine_train import biaffine_train
+from dependency_parsers.lit_biaffine_train import biaffine_train, size_loop
 from dependency_parsers.data.load import data_load
 
 def main():
     parser = argparse.ArgumentParser(description = "Supervised biaffine dependency parser")
 
-    parser.add_argument('mode', type=str, choices=['load', 'train'])
+    parser.add_argument('mode', type=str, choices=['load', 'train', 'loop'])
 
     model = parser.add_argument_group('Model parameters')
     model.add_argument('--batch-size', type=int, default=32)
@@ -14,10 +14,10 @@ def main():
     model.add_argument('--arc-dim', type=int, default=128, help='arc dimension of the biaffine layer')
     model.add_argument('--lab-dim', type=int, default=128, help='label dimension of the biaffine layer')
     model.add_argument('--lstm-dropout', type=float, default=0.1)
-    model.add_argument('--epochs', default=20, help='Number of epochs to train on')
+    model.add_argument('--epochs', type=int, default=50, help='Number of epochs to train on')
     model.add_argument('--lr', type=float, default=2e-3, help='Learning rate of the optimizer')
     model.add_argument('--linear-dropout', type=float, default=0.1, help='Add dropout to the linear layers')
-    
+
     data = parser.add_argument_group('Dataset size')
     data.add_argument('--train', type=int, default=20000, help='Max amount of sentences to load for training')
     data.add_argument('--validation', type=int, default=4000, help='Maximum sentences to load for validation')
@@ -32,11 +32,14 @@ def main():
     loader.add_argument('--limit-sentence-size', type=int, default=0, help='Filter sentences based on how many tokens they have.')
 
     args = parser.parse_args()
+    args.model_name = None
 
     if args.mode == 'load':
         data_load(args)
     if args.mode == 'train':
         biaffine_train(args)
+    if args.mode == 'loop':
+        size_loop(args)
 
 if __name__ == '__main__':
     main()

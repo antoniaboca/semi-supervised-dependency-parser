@@ -55,7 +55,7 @@ class LitLSTM(pl.LightningModule):
 
         # dropout layer
         self.dropout = nn.Dropout(linear_dropout)
-        
+
         # arc linear layer
         self.arc_linear_h = Linear(hidden_dim * 2, arc_dim)  # this is your g
         self.arc_linear_d = Linear(hidden_dim * 2, arc_dim) # this is your f
@@ -140,6 +140,10 @@ class LitLSTM(pl.LightningModule):
 
         num_correct += torch.count_nonzero((targets == parents) * (parents != 0))
         total += torch.count_nonzero((parents == parents) * (parents != 0))
+        
+        self.log('training_loss', total_loss.detach(), on_step=True, on_epoch=True, logger=True)
+        self.log('training_arc_loss', arc_loss.detach(), on_step=True, on_epoch=True, logger=True)
+        self.log('training_lab_loss', lab_loss.detach(), on_step=True, on_epoch=True, logger=True)
 
         return {'loss': total_loss, 
                 'correct': num_correct, 
@@ -162,6 +166,8 @@ class LitLSTM(pl.LightningModule):
             lab_loss += output['lab_loss'] / len(outputs)
         
         self.log_loss.append(loss)
+
+        self.log('training_accuracy', correct/total, on_epoch=True, on_step=False, logger=True)
         print('\nAccuracy after epoch end: {:3.3f} | Arc loss: {:3.3f} | Lab loss: {:3.3f}'.format(correct/total, arc_loss.detach(), lab_loss.detach()))
 
     def validation_step(self, val_batch, batch_idx):
@@ -182,6 +188,10 @@ class LitLSTM(pl.LightningModule):
         num_correct += torch.count_nonzero((parents == targets) * (targets != 0))
         total += torch.count_nonzero((targets == targets)* (targets != 0))
 
+        self.log('validation_loss', total_loss.detach(), on_step=False, on_epoch=True, logger=True)
+        self.log('validation_arc_loss', arc_loss.detach(), on_step=False, on_epoch=True, logger=True)
+        self.log('validation_lab_loss', lab_loss.detach(), on_step=False, on_epoch=True, logger=True)
+
         return {'loss': total_loss, 'correct': num_correct, 'total': total, 'arc_loss':arc_loss.detach(), 'lab_loss': lab_loss.detach()}
 
     def validation_epoch_end(self, preds):
@@ -196,6 +206,8 @@ class LitLSTM(pl.LightningModule):
             loss += pred['loss']
             arc_loss += pred['arc_loss'] / len(preds)
             lab_loss += pred['lab_loss'] / len(preds)
+
+        self.log("validation_accuracy",correct/total, on_epoch=True, logger=True)
 
         print('\nAccuracy on validation set: {:3.3f} | Loss : {:3.3f} | Arc loss: {:3.3f} | Lab loss: {:3.3f}'.format(correct/total, loss/len(preds), arc_loss.detach(), lab_loss.detach()))
         return {'accuracy': correct / total, 'loss': loss/len(preds)}

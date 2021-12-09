@@ -32,7 +32,13 @@ def biaffine_train(args):
     model = LitLSTM(embeddings, EMBEDDING_DIM, HIDDEN_DIM, NUM_LAYERS, LSTM_DROPOUT, LINEAR_DROPOUT,
                     ARC_DIM, LAB_DIM, LABSET, LR, 'cross')
 
-    trainer = pl.Trainer(max_epochs=NUM_EPOCH)
+    early_stop = pl.callbacks.EarlyStopping(monitor='validation_loss', min_delta=0.01, patience=5, mode='min')
+    
+    logger = pl.loggers.TensorBoardLogger('my_logs/')
+    if args.model_name is not None:
+        logger = pl.loggers.TensorBoardLogger('train_size_logs/', sub_dir=args.model_name)
+        
+    trainer = pl.Trainer(max_epochs=NUM_EPOCH, logger=logger, log_every_n_steps=10, flush_logs_every_n_steps=50, callbacks=[early_stop])
     trainer.fit(model, module.train_dataloader, module.dev_dataloader)
 
     #import matplotlib.pyplot as plt
@@ -42,3 +48,10 @@ def biaffine_train(args):
     print('TESTING...')
     results = trainer.test(model, module.test_dataloader, verbose=True)
     print(results)
+
+def size_loop(args):
+    sizes = [1000, 2000, 4000, 8000, 12000]
+    for size in sizes:
+        args.train = size
+        args.model_name = 'train' + str(size)
+        biaffine_train(args)

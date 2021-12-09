@@ -6,3 +6,4 @@
 *.pickle
 /dependency-parsers/data/*.pickle
 lightning_logs/
+*_logs/
