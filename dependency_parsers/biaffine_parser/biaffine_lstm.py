@@ -8,11 +8,12 @@ import torch.nn.functional as F
 import torch.optim as optim
 import torch.nn.functional as F
 
-from torch.nn.utils.rnn import pad_packed_sequence, pack_padded_sequence
+from torch.nn.utils.rnn import pad_sequence, pad_packed_sequence, pack_padded_sequence
 from torch.nn import Linear, LSTM
 
 from torch_struct import NonProjectiveDependencyCRF
 
+from stanza.models.common.chuliu_edmonds import chuliu_edmonds_one_root
 
 import pytorch_lightning as pl
 
@@ -212,8 +213,30 @@ class LitLSTM(pl.LightningModule):
         print('\nAccuracy on validation set: {:3.3f} | Loss : {:3.3f} | Arc loss: {:3.3f} | Lab loss: {:3.3f}'.format(correct/total, loss/len(preds), arc_loss.detach(), lab_loss.detach()))
         return {'accuracy': correct / total, 'loss': loss/len(preds)}
 
-    def test_step(self, batch, batch_idx):
-        return dict(self.validation_step(batch, batch_idx))
+    def test_step(self, test_batch, batch_idx):
+        targets = test_batch['parents']
+        labels = test_batch['labels']
+        lengths = test_batch['lengths']
+
+        batch, maxlen = targets.shape
+        arc_scores, lab_scores = self(test_batch)
+
+        trees, arc_loss = self.edmonds_arc_loss(arc_scores, lengths, targets)
+        lab_loss = self.lab_loss(lab_scores, targets, labels)
+
+        total_loss = arc_loss + lab_loss
+        num_correct = 0
+        total = 0
+
+        num_correct += torch.count_nonzero((trees == targets) * (targets != 0))
+        total += torch.count_nonzero((targets == targets)* (targets != 0))
+
+        self.log('test_loss', total_loss.detach(), on_step=False, on_epoch=True, logger=True)
+        self.log('test_arc_loss', arc_loss.detach(), on_step=False, on_epoch=True, logger=True)
+        self.log('test_lab_loss', lab_loss.detach(), on_step=False, on_epoch=True, logger=True)
+
+        return {'loss': total_loss, 'correct': num_correct, 'total': total, 'arc_loss':arc_loss.detach(), 'lab_loss': lab_loss.detach()}
+
     
     def test_epoch_end(self, preds):
         return self.validation_epoch_end(preds)
@@ -235,6 +258,20 @@ class LitLSTM(pl.LightningModule):
         heads = heads.view(-1)                               # [batch*sent_len]
         return self.loss(S_arc, heads)
     
+    def edmonds_arc_loss(self, S_arc, lengths, heads):
+        S = torch.clone(S_arc.detach())
+        batch_size = S.size(0)
+        trees = []
+
+        for batch in range(batch_size):
+            length = lengths[batch]
+            graph = S[batch][:length, :length]
+            tree = chuliu_edmonds_one_root(graph.numpy())
+            trees.append(torch.tensor(tree))
+
+        batched = pad_sequence(trees, batch_first=True)
+        return batched, self.arc_loss(S_arc, heads)
+
     def new_loss(self, arc_scores, lengths, targets):
         batch, maxlen, _ = arc_scores.shape
         S = NonProjectiveDependencyCRF(arc_scores, lengths)
