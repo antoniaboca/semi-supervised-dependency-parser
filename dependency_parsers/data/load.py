@@ -1,9 +1,13 @@
 import pickle
+import random as rand
+import copy 
+
+from collections import deque
 from .processor import SentenceDataset, EmbeddingDataset, Embed
-from .params import OBJECT_FILE, PARAM_FILE
+from .params import OBJECT_FILE
 from .params import ROOT_TOKEN, ROOT_LABEL, ROOT_TAG
 
-def data_load(args):
+def file_load(args):
     TRAIN_FILE = args.train_data
     VAL_FILE = args.validation_data
     TEST_FILE = args.testing_data
@@ -38,16 +42,56 @@ def data_load(args):
     # dev_set.transform = Embed(embeddings)
     embed_dev_set = [dev_set[idx] for idx in range(len(dev_set))]
 
+    return embedded_set, embed_test_set, embed_dev_set, embeddings, len(training_set.pos_to_index), len(training_set.label_to_index)
+
+def file_save(args):
+    train_set, test_set, dev_set, embeddings, tag_size, label_size = file_load(args)
+
     print('Save the curated set to a file using pickle...')
     with open(OBJECT_FILE, 'wb') as file:
-        pickle.dump({'train': embedded_set, 'test': embed_test_set, 'dev': embed_dev_set, 'embeddings': embeddings}, file)
+        pickle.dump({
+            'train': train_set, 
+            'test': test_set, 
+            'dev': dev_set, 
+            'embeddings': embeddings,
+            'TAGSET_SIZE': tag_size, 
+            'LABSET_SIZE': label_size
+        }, file)
     print('Saved.')
 
-    print('Save other size parameters...')
-    with open(PARAM_FILE, 'wb') as file:
-        pickle.dump({
-            'TAGSET_SIZE': len(training_set.pos_to_index), 
-            'LABSET_SIZE': len(training_set.label_to_index)
+def create_buckets(set):
+    buckets = {}
+    for sentence, tag, parent, label in set:
+        val = len(sentence)
+        if val not in buckets.keys():
+            buckets[val] = deque()
+        buckets[val].append((sentence, tag, parent, label))
+    return buckets
+
+def bucket_save(train_buckets, loaded, file_name, size):
+    train_set, test_set, dev_set, embeddings, tag_size, label_size = loaded
+    ranges = []
+    for bucket in train_buckets.keys():
+        ranges.extend([bucket] * len(train_buckets[bucket]))
+    
+    sample = rand.sample(ranges, size)
+    rand_set = [train_buckets[idx].pop() for idx in sample]
+
+    print(f'Saving sample of size {size} to {file_name}...')
+    with open(file_name, 'wb') as file:
+        pickle.dump({'train': rand_set, 
+            'test': test_set, 
+            'dev': dev_set, 
+            'embeddings': embeddings, 
+            'TAGSET_SIZE': tag_size, 
+            'LABSET_SIZE': label_size
             }, file)
     print('Saved.')
 
+def bucket_loop(args):
+    loaded = file_load(args)
+    train_buckets = create_buckets(loaded[0])
+    data_size = [1000, 2000, 4000, 6000, 8000, 10000, 12000]
+    for size in data_size:
+        aux_buckets = copy.deepcopy(train_buckets)
+        bucket_save(aux_buckets, loaded, 'train' + str(size) + '.pickle', size)

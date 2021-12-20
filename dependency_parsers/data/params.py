@@ -1,5 +1,4 @@
 OBJECT_FILE = 'dependency_parsers/data/cache.pickle'
-PARAM_FILE = 'dependency_parsers/data/parameters.pickle'
 
 ROOT_TOKEN = '@@ROOT@@'
 ROOT_TAG   = '@@ROOT@@'

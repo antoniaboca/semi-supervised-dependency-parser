@@ -1,11 +1,11 @@
 import argparse
 from dependency_parsers.lit_biaffine_train import biaffine_train, size_loop
-from dependency_parsers.data.load import data_load
+from dependency_parsers.data.load import file_save, bucket_loop
 
 def main():
     parser = argparse.ArgumentParser(description = "Supervised biaffine dependency parser")
 
-    parser.add_argument('mode', type=str, choices=['load', 'train', 'loop'])
+    parser.add_argument('mode', type=str, choices=['load', 'train', 'loop', 'bucket'])
 
     model = parser.add_argument_group('Model parameters')
     model.add_argument('--batch-size', type=int, default=32)
@@ -17,6 +17,7 @@ def main():
     model.add_argument('--epochs', type=int, default=50, help='Number of epochs to train on')
     model.add_argument('--lr', type=float, default=1e-3, help='Learning rate of the optimizer')
     model.add_argument('--linear-dropout', type=float, default=0.1, help='Add dropout to the linear layers')
+    model.add_argument('--file', type=str, default='dependency_parsers/data/cache.pickle', help='File with the embedded set')
 
     data = parser.add_argument_group('Dataset size')
     data.add_argument('--train', type=int, default=20000, help='Max amount of sentences to load for training')
@@ -34,8 +35,10 @@ def main():
     args = parser.parse_args()
     args.model_name = None
 
+    if args.mode == 'bucket':
+        bucket_loop(args)
     if args.mode == 'load':
-        data_load(args)
+        file_save(args)
     if args.mode == 'train':
         biaffine_train(args)
     if args.mode == 'loop':

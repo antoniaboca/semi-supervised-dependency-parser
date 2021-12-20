@@ -1,6 +1,5 @@
 from torch.nn.modules.loss import CrossEntropyLoss
 from .lit_data_module import DataModule
-from .data.params import OBJECT_FILE, PARAM_FILE
 from .biaffine_parser.biaffine_lstm import LitLSTM
 
 import torch
@@ -17,13 +16,13 @@ def biaffine_train(args):
     LSTM_DROPOUT = args.lstm_dropout
     LINEAR_DROPOUT = args.linear_dropout
     NUM_EPOCH = args.epochs
-
+    DATA_FILE = args.file
     LR = args.lr
     TRAIN_SIZE = args.train
     VAL_SIZE = args.validation
     TEST_SIZE = args.test
 
-    module = DataModule(OBJECT_FILE, BATCH_SIZE, PARAM_FILE, EMBEDDING_DIM, 
+    module = DataModule(DATA_FILE, BATCH_SIZE, EMBEDDING_DIM, 
                         TRAIN_SIZE, VAL_SIZE, TEST_SIZE)
 
     TAGSET = module.TAGSET_SIZE
@@ -53,5 +52,6 @@ def size_loop(args):
     sizes = [1000, 2000, 4000, 8000, 12000]
     for size in sizes:
         args.train = size
-        args.model_name = 'train' + str(size)
+        args.file = 'train' + str(size) + '.pickle'
+        args.model_name = 'train_chuliu_edmonds_' + str(size)
         biaffine_train(args)

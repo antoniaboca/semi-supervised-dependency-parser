@@ -7,7 +7,7 @@ import pytorch_lightning as pl
 from torch.utils.data import DataLoader
 
 class DataModule(pl.LightningDataModule):
-    def __init__(self, PICKLE_FILE, BATCH_SIZE, PARAM_FILE, EMBEDDING_DIM,
+    def __init__(self, PICKLE_FILE, BATCH_SIZE, EMBEDDING_DIM,
                 TRAIN_SIZE, VAL_SIZE, TEST_SIZE):
 
         with open(PICKLE_FILE, 'rb') as file:
@@ -16,17 +16,14 @@ class DataModule(pl.LightningDataModule):
             dev_set = object['dev'][:VAL_SIZE]
             test_set = object['test'][:TEST_SIZE]
             self.embeddings = object['embeddings']
+            self.TAGSET_SIZE = object['TAGSET_SIZE']
+            self.LABSET_SIZE = object['LABSET_SIZE']
 
             assert self.embeddings.shape[-1] == EMBEDDING_DIM, "The embedding dimension does not match the loaded embedding file"
 
         self.train_dataloader = DataLoader(train_set, batch_size=BATCH_SIZE, shuffle=False, collate_fn=collate_fn_padder)
         self.test_dataloader = DataLoader(test_set, batch_size=BATCH_SIZE, shuffle=False, collate_fn=collate_fn_padder)
         self.dev_dataloader = DataLoader(dev_set, batch_size=BATCH_SIZE, shuffle=False, collate_fn=collate_fn_padder)
-
-        with open(PARAM_FILE, 'rb') as file:
-            dict = pickle.load(file)
-        self.TAGSET_SIZE = dict['TAGSET_SIZE']
-        self.LABSET_SIZE = dict['LABSET_SIZE']
 
     def dev_dataloader(self):
         return self.dev_dataloader
