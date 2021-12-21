@@ -36,12 +36,13 @@ class Biaffine(nn.Module):
 
 class LitLSTM(pl.LightningModule):
     def __init__(self, embeddings, embedding_dim, hidden_dim, num_layers, 
-                lstm_dropout, linear_dropout, arc_dim, lab_dim, num_labels, lr, loss_arg):
+                lstm_dropout, linear_dropout, arc_dim, lab_dim, num_labels, lr, loss_arg, cle_arg):
         super().__init__()
         self.hidden_dim = hidden_dim
         self.arc_dim = arc_dim
         self.lab_dim = lab_dim
         self.lr = lr
+        self.cle = cle_arg
 
         self.lstm = LSTM(
             input_size=embedding_dim, 
@@ -220,8 +221,13 @@ class LitLSTM(pl.LightningModule):
 
         batch, maxlen = targets.shape
         arc_scores, lab_scores = self(test_batch)
-
-        trees, arc_loss = self.edmonds_arc_loss(arc_scores, lengths, targets)
+        
+        if self.cle:
+            trees, arc_loss = self.edmonds_arc_loss(arc_scores, lengths, targets)
+        else:
+            trees = torch.argmax(arc_scores, dim=2)
+            arc_loss = self.arc_loss(arc_scores, targets)
+            
         lab_loss = self.lab_loss(lab_scores, targets, labels)
 
         total_loss = arc_loss + lab_loss

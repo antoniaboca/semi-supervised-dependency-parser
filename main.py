@@ -18,6 +18,7 @@ def main():
     model.add_argument('--lr', type=float, default=1e-3, help='Learning rate of the optimizer')
     model.add_argument('--linear-dropout', type=float, default=0.1, help='Add dropout to the linear layers')
     model.add_argument('--file', type=str, default='dependency_parsers/data/cache.pickle', help='File with the embedded set')
+    model.add_argument('--cle', action='store_true', help='Use the chuliu-edmonds algorithm to create trees for testing phase')
 
     data = parser.add_argument_group('Dataset size')
     data.add_argument('--train', type=int, default=20000, help='Max amount of sentences to load for training')
