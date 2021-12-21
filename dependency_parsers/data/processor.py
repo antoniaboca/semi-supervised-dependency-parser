@@ -203,9 +203,11 @@ def collate_fn_padder(samples):
 
     padded_sent = pad_sequence(indexes, batch_first=True, padding_value=0)
     padded_tags = pad_sequence(tags, batch_first=True, padding_value=0)
-    padded_parents = pad_sequence(parents, batch_first=True, padding_value=0)
+    padded_parents = pad_sequence(parents, batch_first=True, padding_value=-1)
     padded_labels = pad_sequence(labels, batch_first=True, padding_value=0)
-
+    
+    padded_parents[:, 0] = -1
+    
     return {
         'sentence': padded_sent, 
         'tags': padded_tags, 

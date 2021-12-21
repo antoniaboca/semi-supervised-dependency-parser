@@ -79,7 +79,7 @@ class LitLSTM(pl.LightningModule):
         self.lab_biaffine = Biaffine(lab_dim, num_labels)
 
         if loss_arg == 'cross':
-            self.loss = nn.CrossEntropyLoss(ignore_index=0)
+            self.loss = nn.CrossEntropyLoss(ignore_index=-1)
         elif loss_arg == 'mtt':
             self.loss = self.loss_function
 
@@ -140,8 +140,8 @@ class LitLSTM(pl.LightningModule):
         num_correct = 0
         total = 0
 
-        num_correct += torch.count_nonzero((targets == parents) * (parents != 0))
-        total += torch.count_nonzero((parents == parents) * (parents != 0))
+        num_correct += torch.count_nonzero((targets == parents) * (parents != -1))
+        total += torch.count_nonzero((parents == parents) * (parents != -1))
         
         self.log('training_loss', total_loss.detach(), on_step=True, on_epoch=True, logger=True)
         self.log('training_arc_loss', arc_loss.detach(), on_step=True, on_epoch=True, logger=True)
@@ -187,8 +187,8 @@ class LitLSTM(pl.LightningModule):
         total = 0
         
         parents = torch.argmax(arc_scores, dim=2)
-        num_correct += torch.count_nonzero((parents == targets) * (targets != 0))
-        total += torch.count_nonzero((targets == targets)* (targets != 0))
+        num_correct += torch.count_nonzero((parents == targets) * (targets != -1))
+        total += torch.count_nonzero((targets == targets)* (targets != -1))
 
         self.log('validation_loss', total_loss.detach(), on_step=False, on_epoch=True, logger=True)
         self.log('validation_arc_loss', arc_loss.detach(), on_step=False, on_epoch=True, logger=True)
@@ -227,15 +227,15 @@ class LitLSTM(pl.LightningModule):
         else:
             trees = torch.argmax(arc_scores, dim=2)
             arc_loss = self.arc_loss(arc_scores, targets)
-            
+
         lab_loss = self.lab_loss(lab_scores, targets, labels)
 
         total_loss = arc_loss + lab_loss
         num_correct = 0
         total = 0
 
-        num_correct += torch.count_nonzero((trees == targets) * (targets != 0))
-        total += torch.count_nonzero((targets == targets)* (targets != 0))
+        num_correct += torch.count_nonzero((trees == targets) * (targets != -1))
+        total += torch.count_nonzero((targets == targets)* (targets != -1))
 
         self.log('test_loss', total_loss.detach(), on_step=False, on_epoch=True, logger=True)
         self.log('test_arc_loss', arc_loss.detach(), on_step=False, on_epoch=True, logger=True)
@@ -247,8 +247,10 @@ class LitLSTM(pl.LightningModule):
     def test_epoch_end(self, preds):
         return self.validation_epoch_end(preds)
 
-    def lab_loss(self, S_lab, heads, labels):
+    def lab_loss(self, S_lab, parents, labels):
         """Compute the loss for the label predictions on the gold arcs (heads)."""
+        heads = torch.clone(parents)
+        heads[heads == -1] = 0
         heads = heads.unsqueeze(1).unsqueeze(2)              # [batch, 1, 1, sent_len]
         heads = heads.expand(-1, S_lab.size(1), -1, -1)      # [batch, n_labels, 1, sent_len]
         S_lab = torch.gather(S_lab, 2, heads).squeeze(2)     # [batch, n_labels, sent_len]
@@ -275,7 +277,9 @@ class LitLSTM(pl.LightningModule):
             tree = chuliu_edmonds_one_root(graph.numpy())
             trees.append(torch.tensor(tree))
 
-        batched = pad_sequence(trees, batch_first=True)
+        batched = pad_sequence(trees, batch_first=True, padding_value=-1)
+        batched[:, 0] = -1
+
         return batched, self.arc_loss(S_arc, heads)
 
     def new_loss(self, arc_scores, lengths, targets):
