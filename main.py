@@ -19,6 +19,8 @@ def main():
     model.add_argument('--linear-dropout', type=float, default=0.1, help='Add dropout to the linear layers')
     model.add_argument('--file', type=str, default='dependency_parsers/data/cache.pickle', help='File with the embedded set')
     model.add_argument('--cle', action='store_true', help='Use the chuliu-edmonds algorithm to create trees for testing phase')
+    model.add_argument('--semi', action='store_true', help='Use the semi-supervised dependency parser')
+    model.add_argument('-labelled-size', type=int, default=20000, help='Number of labelled sentences in the semi-supervised context')
 
     data = parser.add_argument_group('Dataset size')
     data.add_argument('--train', type=int, default=20000, help='Max amount of sentences to load for training')

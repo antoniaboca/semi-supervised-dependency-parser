@@ -5,6 +5,30 @@ from .biaffine_parser.biaffine_lstm import LitLSTM
 import torch
 import pytorch_lightning as pl
 
+def prior_distribution(set):
+    tree_edges = {}
+    graph_edges = {}
+
+    for sentence in set:
+        for idx1 in range(len(sentence[0])):
+            for idx2 in range(len(sentence[0])):
+                if idx1 == idx2:
+                    continue
+
+                tag1 = sentence[1][idx1]
+                tag2, parent2 = sentence[1][idx2], sentence[2][idx2]
+                
+                if (tag1, tag2) not in graph_edges:
+                    graph_edges[(tag1, tag2)] = 0
+                graph_edges[(tag1, tag2)] += 1
+
+                if parent2 == idx1:
+                    if (tag1, tag2) not in tree_edges:
+                        tree_edges[(tag1, tag2)] = 0
+                    tree_edges[(tag1, tag2)] += 1
+
+    return tree_edges, graph_edges
+
 def biaffine_train(args):
 
     BATCH_SIZE = args.batch_size
@@ -23,11 +47,16 @@ def biaffine_train(args):
     TEST_SIZE = args.test
 
     module = DataModule(DATA_FILE, BATCH_SIZE, EMBEDDING_DIM, 
-                        TRAIN_SIZE, VAL_SIZE, TEST_SIZE)
+                        TRAIN_SIZE, VAL_SIZE, TEST_SIZE, args)
 
     TAGSET = module.TAGSET_SIZE
     LABSET = module.LABSET_SIZE
     embeddings = module.embeddings
+    if args.semi:
+        labelled = module.labelled
+        print('Creating prior distribution for the semi-supervised context...')
+        tree_edges, graph_edges = prior_distribution(labelled)
+
     model = LitLSTM(embeddings, EMBEDDING_DIM, HIDDEN_DIM, NUM_LAYERS, LSTM_DROPOUT, LINEAR_DROPOUT,
                     ARC_DIM, LAB_DIM, LABSET, LR, 'cross', args.cle)
 

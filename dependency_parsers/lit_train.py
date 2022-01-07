@@ -15,11 +15,6 @@ trainer.fit(model, module.train_dataloader, module.dev_dataloader)
 
 loss_fn = model.loss_fn
 
-#import matplotlib.pyplot as plt
-
-#plt.plot(loss_fn)
-#plt.show()
-
 print('TESTING...')
 results = trainer.test(model, module.dev_dataloader, verbose=True)
 print(results)

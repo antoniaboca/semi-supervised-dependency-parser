@@ -18,6 +18,10 @@ class SentenceDataset(Dataset):
         pos_tags = {}
         label = {}
 
+        words[ROOT_TOKEN] = 0
+        pos_tags[ROOT_TAG] = 0
+        label[ROOT_LABEL] = 0
+
         data = pyconll.load_from_file(file)
 
         self.sentences = []
@@ -33,6 +37,10 @@ class SentenceDataset(Dataset):
             parents = [0]
             labels = [ROOT_LABEL]
 
+            words[ROOT_TOKEN] += 1
+            pos_tags[ROOT_TAG] += 1
+            label[ROOT_LABEL] += 1
+            
             for token in sentence:
                 if token.id.isdigit():
                     parents.append(int(token.head))
@@ -41,7 +49,6 @@ class SentenceDataset(Dataset):
 
                 if token.lemma is None or token.upos is None or token.deprel is None:
                     continue
-                
 
                 word = token.lemma.lower()
                 if token.lemma in words:
@@ -207,7 +214,7 @@ def collate_fn_padder(samples):
     padded_labels = pad_sequence(labels, batch_first=True, padding_value=0)
     
     padded_parents[:, 0] = -1
-    
+
     return {
         'sentence': padded_sent, 
         'tags': padded_tags, 

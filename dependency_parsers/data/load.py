@@ -42,18 +42,20 @@ def file_load(args):
     # dev_set.transform = Embed(embeddings)
     embed_dev_set = [dev_set[idx] for idx in range(len(dev_set))]
 
-    return embedded_set, embed_test_set, embed_dev_set, embeddings, len(training_set.pos_to_index), len(training_set.label_to_index)
+    vocab = training_set.vocabulary
+    return embedded_set, embed_test_set, embed_dev_set, embeddings, vocab, len(training_set.pos_to_index), len(training_set.label_to_index)
 
 def file_save(args):
-    train_set, test_set, dev_set, embeddings, tag_size, label_size = file_load(args)
+    train_set, test_set, dev_set, embeddings, vocab, tag_size, label_size = file_load(args)
 
     print('Save the curated set to a file using pickle...')
     with open(OBJECT_FILE, 'wb') as file:
         pickle.dump({
-            'train': train_set, 
+            'train_labelled': train_set, 
             'test': test_set, 
             'dev': dev_set, 
             'embeddings': embeddings,
+            'vocabulary': vocab,
             'TAGSET_SIZE': tag_size, 
             'LABSET_SIZE': label_size
         }, file)
@@ -69,7 +71,7 @@ def create_buckets(set):
     return buckets
 
 def bucket_save(train_buckets, loaded, file_name, size):
-    train_set, test_set, dev_set, embeddings, tag_size, label_size = loaded
+    train_set, test_set, dev_set, embeddings, vocab, tag_size, label_size = loaded
     ranges = []
     for bucket in train_buckets.keys():
         ranges.extend([bucket] * len(train_buckets[bucket]))
@@ -79,17 +81,18 @@ def bucket_save(train_buckets, loaded, file_name, size):
 
     print(f'Saving sample of size {size} to {file_name}...')
     with open(file_name, 'wb') as file:
-        pickle.dump({'train': rand_set, 
+        pickle.dump({'train_labelled': rand_set, 
             'test': test_set, 
             'dev': dev_set, 
             'embeddings': embeddings, 
+            'vocabulary': vocab,
             'TAGSET_SIZE': tag_size, 
             'LABSET_SIZE': label_size
             }, file)
     print('Saved.')
 
 def bucket_unlabelled_save(train_buckets, loaded, file_name, size):
-    train_set, test_set, dev_set, embeddings, tag_size, label_size = loaded
+    train_set, test_set, dev_set, embeddings, vocab, tag_size, label_size = loaded
 
     ranges = []
     for bucket in train_buckets.keys():
@@ -103,7 +106,7 @@ def bucket_unlabelled_save(train_buckets, loaded, file_name, size):
         while train_buckets[bucket]:
             remainder.append(train_buckets[bucket].pop())
 
-    unlabelled_set = [(s, p, l) for s, _, p, l in remainder]
+    unlabelled_set = [(s, l) for s, _, _, l in remainder]
     rand.shuffle(unlabelled_set)
 
     print(f'Saving labelled sample of size {size} AND the rest of unlabelled samples to {file_name}...')
@@ -113,6 +116,7 @@ def bucket_unlabelled_save(train_buckets, loaded, file_name, size):
             'test': test_set, 
             'dev': dev_set, 
             'embeddings': embeddings, 
+            'vocabulary': vocab,
             'TAGSET_SIZE': tag_size, 
             'LABSET_SIZE': label_size
             }, file)

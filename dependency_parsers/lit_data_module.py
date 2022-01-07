@@ -8,11 +8,16 @@ from torch.utils.data import DataLoader
 
 class DataModule(pl.LightningDataModule):
     def __init__(self, PICKLE_FILE, BATCH_SIZE, EMBEDDING_DIM,
-                TRAIN_SIZE, VAL_SIZE, TEST_SIZE):
+                TRAIN_SIZE, VAL_SIZE, TEST_SIZE, args):
 
         with open(PICKLE_FILE, 'rb') as file:
             object = pickle.load(file)
-            train_set = object['train'][:TRAIN_SIZE]
+            if args.semi:
+                train_set = object['train_unlabelled'][:TRAIN_SIZE]
+                self.labelled = object['train_labelled'][:args.labelled_size]
+            else:
+                train_set = object['train_labelled'][:TRAIN_SIZE]
+
             dev_set = object['dev'][:VAL_SIZE]
             test_set = object['test'][:TEST_SIZE]
             self.embeddings = object['embeddings']
