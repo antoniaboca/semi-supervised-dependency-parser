@@ -88,6 +88,36 @@ def bucket_save(train_buckets, loaded, file_name, size):
             }, file)
     print('Saved.')
 
+def bucket_unlabelled_save(train_buckets, loaded, file_name, size):
+    train_set, test_set, dev_set, embeddings, tag_size, label_size = loaded
+
+    ranges = []
+    for bucket in train_buckets.keys():
+        ranges.extend([bucket] * len(train_buckets[bucket]))
+    
+    sample = rand.sample(ranges, size)
+    labelled_set = [train_buckets[idx].pop() for idx in sample]
+
+    remainder = []
+    for bucket in train_buckets.keys():
+        while train_buckets[bucket]:
+            remainder.append(train_buckets[bucket].pop())
+
+    unlabelled_set = [(s, p, l) for s, _, p, l in remainder]
+    rand.shuffle(unlabelled_set)
+
+    print(f'Saving labelled sample of size {size} AND the rest of unlabelled samples to {file_name}...')
+    with open(file_name, 'wb') as file:
+        pickle.dump({'train_labelled': labelled_set, 
+            'train_unlabelled': unlabelled_set,
+            'test': test_set, 
+            'dev': dev_set, 
+            'embeddings': embeddings, 
+            'TAGSET_SIZE': tag_size, 
+            'LABSET_SIZE': label_size
+            }, file)
+    print('Saved.')
+
 def bucket_loop(args):
     loaded = file_load(args)
     train_buckets = create_buckets(loaded[0])
@@ -95,3 +125,11 @@ def bucket_loop(args):
     for size in data_size:
         aux_buckets = copy.deepcopy(train_buckets)
         bucket_save(aux_buckets, loaded, 'train' + str(size) + '.pickle', size)
+
+def bucket_unlabelled_loop(args):
+    loaded = file_load(args)
+    train_buckets = create_buckets(loaded[0])
+    data_size = [100, 500, 1000, 4000]
+    for size in data_size:
+        aux_buckets = copy.deepcopy(train_buckets)
+        bucket_unlabelled_save(aux_buckets, loaded, 'unlabelled' + str(size) + '.pickle', size)

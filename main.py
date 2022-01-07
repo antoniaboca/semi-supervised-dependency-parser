@@ -1,11 +1,11 @@
 import argparse
 from dependency_parsers.lit_biaffine_train import biaffine_train, size_loop
-from dependency_parsers.data.load import file_save, bucket_loop
+from dependency_parsers.data.load import file_save, bucket_loop, bucket_unlabelled_loop
 
 def main():
     parser = argparse.ArgumentParser(description = "Supervised biaffine dependency parser")
 
-    parser.add_argument('mode', type=str, choices=['load', 'train', 'loop', 'bucket'])
+    parser.add_argument('mode', type=str, choices=['load', 'train', 'loop', 'labelled_bucket', 'unlabelled_bucket'])
 
     model = parser.add_argument_group('Model parameters')
     model.add_argument('--batch-size', type=int, default=32)
@@ -36,8 +36,11 @@ def main():
     args = parser.parse_args()
     args.model_name = None
 
-    if args.mode == 'bucket':
+    if args.mode == 'labelled_bucket':
         bucket_loop(args)
+    if args.mode == 'unlabelled_bucket':
+        bucket_unlabelled_loop(args)
+
     if args.mode == 'load':
         file_save(args)
     if args.mode == 'train':
