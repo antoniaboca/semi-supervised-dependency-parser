@@ -32,6 +32,8 @@ def edge_count(set):
 def top20(tree, graph):
     distribution = {}
     for edge in graph.keys():
+        if graph[edge] < 10:
+            continue
         distribution[edge] = tree.get(edge, 0) / graph[edge]
     top = []
     for key, value in distribution.items():
