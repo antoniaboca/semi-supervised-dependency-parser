@@ -5,7 +5,7 @@ from .biaffine_parser.biaffine_lstm import LitLSTM
 import torch
 import pytorch_lightning as pl
 
-def prior_distribution(set):
+def edge_count(set):
     tree_edges = {}
     graph_edges = {}
 
@@ -28,6 +28,19 @@ def prior_distribution(set):
                     tree_edges[(tag1, tag2)] += 1
 
     return tree_edges, graph_edges
+
+def top20(tree, graph):
+    distribution = {}
+    for edge in graph.keys():
+        distribution[edge] = tree.get(edge, 0) / graph[edge]
+    top = []
+    for key, value in distribution.items():
+        top.append((value, key))
+    top.sort(reverse=True)
+    distribution = {}
+    for value, key in top[:20]:
+        distribution[key] = value
+    return distribution
 
 def biaffine_train(args):
 
@@ -55,7 +68,8 @@ def biaffine_train(args):
     if args.semi:
         labelled = module.labelled
         print('Creating prior distribution for the semi-supervised context...')
-        tree_edges, graph_edges = prior_distribution(labelled)
+        tree_edges, graph_edges = edge_count(labelled)
+        features20 = top20(tree_edges, graph_edges)
 
     model = LitLSTM(embeddings, EMBEDDING_DIM, HIDDEN_DIM, NUM_LAYERS, LSTM_DROPOUT, LINEAR_DROPOUT,
                     ARC_DIM, LAB_DIM, LABSET, LR, 'cross', args.cle)
