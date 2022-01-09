@@ -108,7 +108,7 @@ class SentenceDataset(Dataset):
             self.tag_set.append(tidxs)
             self.parent_set.append(parents)
             self.label_set.append(lidxs)
-            
+
     def __len__(self):
         return len(self.index_set)
     
@@ -194,7 +194,7 @@ class Embed(object):
 
         return (sentence, embedded, tags, parents)
 
-def collate_fn_padder(samples):
+def labelled_padder(samples):
     # batch of samples to be expected to look like
     # [(index_sent1, tag_set1, parent_set1, label_set1), ...]
 
@@ -223,4 +223,34 @@ def collate_fn_padder(samples):
         'labels': padded_labels,
     }
 
+def unlabelled_padder(samples):
+    # batch of samples to be expected to look like
+    # [(idxs1, tags1, features1), ...]
 
+    indexes, tags, parents, labels, features = zip(*samples)
+
+    sent_lens = torch.tensor([len(sent) for sent in indexes])
+
+    indexes = [torch.tensor(sent) for sent in indexes]
+    tags = [torch.tensor(tag) for tag in tags]
+    features = [torch.tensor(feature) for feature in features]
+
+    parents = [torch.tensor(parent) for parent in parents]
+    labels = [torch.tensor(label) for label in labels]
+
+    padded_sent = pad_sequence(indexes, batch_first=True, padding_value=0)
+    padded_tags = pad_sequence(tags, batch_first=True, padding_value=0)
+    
+    padded_parents = pad_sequence(parents, batch_first=True, padding_value=-1)
+    padded_labels = pad_sequence(labels, batch_first=True, padding_value=0)
+    
+    padded_parents[:, 0] = -1
+
+    return {
+        'sentence': padded_sent, 
+        'tags': padded_tags, 
+        'parents': padded_parents,
+        'labels': padded_labels,
+        'features': features,
+        'lengths': sent_lens,
+    }

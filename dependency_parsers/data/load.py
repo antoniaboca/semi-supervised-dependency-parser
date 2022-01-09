@@ -106,13 +106,14 @@ def bucket_unlabelled_save(train_buckets, loaded, file_name, size):
         while train_buckets[bucket]:
             remainder.append(train_buckets[bucket].pop())
 
-    unlabelled_set = [(s, t) for s, t, _, _ in remainder] # get rid of parent and label
+    # unlabelled_set = [(s, t) for s, t, _, _ in remainder] # get rid of parent and label
+    unlabelled_set = remainder
     rand.shuffle(unlabelled_set)
 
-    for _, tags in unlabelled_set:
+    for _, tags, _, _ in unlabelled_set:
         for tag in tags:
             assert tag < 20
-            
+
     print(f'Saving labelled sample of size {size} AND the rest of unlabelled samples to {file_name}...')
     with open(file_name, 'wb') as file:
         pickle.dump({'train_labelled': labelled_set, 

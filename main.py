@@ -1,5 +1,6 @@
 import argparse
 from dependency_parsers.lit_biaffine_train import biaffine_train, size_loop
+from dependency_parsers.lit_semi_supervised_train import semisupervised_train
 from dependency_parsers.data.load import file_save, bucket_loop, bucket_unlabelled_loop
 
 def main():
@@ -46,7 +47,11 @@ def main():
     if args.mode == 'load':
         file_save(args)
     if args.mode == 'train':
-        biaffine_train(args)
+        if args.semi is False:
+            biaffine_train(args)
+        else:
+            semisupervised_train(args)
+            
     if args.mode == 'loop':
         size_loop(args)
 

@@ -1,6 +1,6 @@
 import pickle
 import numpy as np
-from .data.processor import collate_fn_padder
+from .data.processor import labelled_padder, unlabelled_padder
 
 import pytorch_lightning as pl
 from torch.utils.data import DataLoader
@@ -53,18 +53,18 @@ def top20(tree, graph):
 
 def feature_vector(order, unlabelled_set):
     if len(unlabelled_set) > 0:
-        assert len(unlabelled_set[0]) == 2 # I assume an unlabelled tuple has word indexes and pos tag indexes
+        assert len(unlabelled_set[0]) == 4 # I assume an unlabelled tuple has word indexes, tags, parents, labels and feature vectors
         
     feature_list = []
-    for idxs, tags in unlabelled_set:
+    for idxs, tags, _, _ in unlabelled_set:
         vec = np.zeros((len(tags), len(tags), len(order)), dtype=np.int32)
         for idx1 in range(len(tags)):
             for idx2 in range(len(tags)):
                 assert tags[idx1] < 20 and tags[idx2] < 20
-                
+
                 if (tags[idx1], tags[idx2]) in order:
                     vec[idx1][idx2][order[(tags[idx1], tags[idx2])]] = 1
-        feature_list.append((idxs, tags, vec))
+        feature_list.append(vec)
     
     return feature_list
 
@@ -75,16 +75,21 @@ class DataModule(pl.LightningDataModule):
         with open(PICKLE_FILE, 'rb') as file:
             object = pickle.load(file)
             if args.semi:
-                train_set = object['train_unlabelled'][:TRAIN_SIZE]
+                unlabelled_set = object['train_unlabelled'][:TRAIN_SIZE]
                 self.labelled = object['train_labelled'][:args.labelled_size]
 
                 print('Creating prior distribution for the semi-supervised context...')
                 tree_edges, graph_edges = edge_count(self.labelled)
                 self.features20, self.order20 = top20(tree_edges, graph_edges)
-                feature_set = feature_vector(self.order20, train_set) # this is the training set for the semi-supervised context
+                feature_set = feature_vector(self.order20, unlabelled_set) # this is the training set for the semi-supervised context
 
+                self.unlabelled = [(*a,b) for a, b in zip(unlabelled_set, feature_set)]
+                train_set = self.unlabelled
+
+                padder = unlabelled_padder
             else:
                 train_set = object['train_labelled'][:TRAIN_SIZE]
+                padder = labelled_padder
 
             dev_set = object['dev'][:VAL_SIZE]
             test_set = object['test'][:TEST_SIZE]
@@ -94,9 +99,10 @@ class DataModule(pl.LightningDataModule):
 
             assert self.embeddings.shape[-1] == EMBEDDING_DIM, "The embedding dimension does not match the loaded embedding file"
 
-        self.train_dataloader = DataLoader(train_set, batch_size=BATCH_SIZE, shuffle=False, collate_fn=collate_fn_padder)
-        self.test_dataloader = DataLoader(test_set, batch_size=BATCH_SIZE, shuffle=False, collate_fn=collate_fn_padder)
-        self.dev_dataloader = DataLoader(dev_set, batch_size=BATCH_SIZE, shuffle=False, collate_fn=collate_fn_padder)
+
+        self.train_dataloader = DataLoader(train_set, batch_size=BATCH_SIZE, shuffle=False, collate_fn=padder)
+        self.test_dataloader = DataLoader(test_set, batch_size=BATCH_SIZE, shuffle=False, collate_fn=labelled_padder)
+        self.dev_dataloader = DataLoader(dev_set, batch_size=BATCH_SIZE, shuffle=False, collate_fn=labelled_padder)
 
     def dev_dataloader(self):
         return self.dev_dataloader
