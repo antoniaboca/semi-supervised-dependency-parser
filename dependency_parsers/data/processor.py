@@ -40,7 +40,7 @@ class SentenceDataset(Dataset):
             words[ROOT_TOKEN] += 1
             pos_tags[ROOT_TAG] += 1
             label[ROOT_LABEL] += 1
-            
+
             for token in sentence:
                 if token.id.isdigit():
                     parents.append(int(token.head))
@@ -108,7 +108,7 @@ class SentenceDataset(Dataset):
             self.tag_set.append(tidxs)
             self.parent_set.append(parents)
             self.label_set.append(lidxs)
-
+            
     def __len__(self):
         return len(self.index_set)
     

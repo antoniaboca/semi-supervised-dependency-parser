@@ -5,45 +5,6 @@ from .biaffine_parser.biaffine_lstm import LitLSTM
 import torch
 import pytorch_lightning as pl
 
-def edge_count(set):
-    tree_edges = {}
-    graph_edges = {}
-
-    for sentence in set:
-        for idx1 in range(len(sentence[0])):
-            for idx2 in range(len(sentence[0])):
-                if idx1 == idx2:
-                    continue
-
-                tag1 = sentence[1][idx1]
-                tag2, parent2 = sentence[1][idx2], sentence[2][idx2]
-                
-                if (tag1, tag2) not in graph_edges:
-                    graph_edges[(tag1, tag2)] = 0
-                graph_edges[(tag1, tag2)] += 1
-
-                if parent2 == idx1:
-                    if (tag1, tag2) not in tree_edges:
-                        tree_edges[(tag1, tag2)] = 0
-                    tree_edges[(tag1, tag2)] += 1
-
-    return tree_edges, graph_edges
-
-def top20(tree, graph):
-    distribution = {}
-    for edge in graph.keys():
-        if graph[edge] < 10:
-            continue
-        distribution[edge] = tree.get(edge, 0) / graph[edge]
-    top = []
-    for key, value in distribution.items():
-        top.append((value, key))
-    top.sort(reverse=True)
-    distribution = {}
-    for value, key in top[:20]:
-        distribution[key] = value
-    return distribution
-
 def biaffine_train(args):
 
     BATCH_SIZE = args.batch_size
@@ -67,12 +28,7 @@ def biaffine_train(args):
     TAGSET = module.TAGSET_SIZE
     LABSET = module.LABSET_SIZE
     embeddings = module.embeddings
-    if args.semi:
-        labelled = module.labelled
-        print('Creating prior distribution for the semi-supervised context...')
-        tree_edges, graph_edges = edge_count(labelled)
-        features20 = top20(tree_edges, graph_edges)
-
+    
     model = LitLSTM(embeddings, EMBEDDING_DIM, HIDDEN_DIM, NUM_LAYERS, LSTM_DROPOUT, LINEAR_DROPOUT,
                     ARC_DIM, LAB_DIM, LABSET, LR, 'cross', args.cle)
 
