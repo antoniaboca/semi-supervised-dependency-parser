@@ -28,8 +28,9 @@ def semisupervised_train(args):
     TAGSET = module.TAGSET_SIZE
     LABSET = module.LABSET_SIZE
     embeddings = module.embeddings
-    
-    model = LitSemiSupervisedLSTM(embeddings, EMBEDDING_DIM, HIDDEN_DIM, NUM_LAYERS, LSTM_DROPOUT, LINEAR_DROPOUT,
+    prior = module.get_prior()
+
+    model = LitSemiSupervisedLSTM(embeddings, prior, EMBEDDING_DIM, HIDDEN_DIM, NUM_LAYERS, LSTM_DROPOUT, LINEAR_DROPOUT,
                     ARC_DIM, LAB_DIM, LABSET, LR, 'cross', args.cle)
 
     early_stop = pl.callbacks.EarlyStopping(monitor='validation_loss', min_delta=0.01, patience=5, mode='min')

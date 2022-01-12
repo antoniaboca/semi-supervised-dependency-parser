@@ -339,7 +339,7 @@ class LitLSTM(pl.LightningModule):
         S = S.reshape((batch * maxlen, maxlen))
         valid = torch.reshape(targets, (batch * maxlen,))
 
-        masker = valid == -100
+        masker = valid == -1
         offset = torch.arange(start=0, end=maxlen * batch, step=maxlen).unsqueeze(-1).expand(-1, maxlen).reshape((batch * maxlen,))
         indexer = torch.arange(maxlen).repeat(batch, 1).reshape((batch*maxlen,))
         assert valid.shape == indexer.shape

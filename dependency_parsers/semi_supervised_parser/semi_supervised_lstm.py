@@ -17,32 +17,6 @@ from stanza.models.common.chuliu_edmonds import chuliu_edmonds_one_root
 
 import pytorch_lightning as pl
 
-def apply_log_softmax(scores, lengths):
-    lengths = lengths - torch.ones(len(lengths))
-
-    batch, maxlen, _ = scores.shape
-    pads = torch.arange(maxlen) >= lengths.unsqueeze(1)
-    mask = pads.unsqueeze(1) | pads.unsqueeze(2)
-
-    # set the scores of arcs to padding tokens to a large negative number
-    scores.masked_fill_(mask, -1e9)
-    return F.log_softmax(scores, dim=-1)
-
-def root_to_diagonal(scores):
-    """
-        Turning a matrix of scores (N+1, N+1) where ROOT is index 0
-        into a matrix of scores (N, N) where diagonals represent
-        outgoing edges from the root
-
-        e.g. a[ i ][ i ] = score(ROOT -> i)
-    """
-    batch, maxlen, _ = scores.shape
-
-    outgoing = scores[:, 0, 1:]
-    shrink = scores[:, 1:, 1:]
-    shrink[:, range(maxlen-1), range(maxlen-1)] = outgoing
-    return shrink
-
 class Biaffine(nn.Module):
     def __init__(self, arc_dim, output_dim):
         super().__init__()
@@ -61,7 +35,7 @@ class Biaffine(nn.Module):
         nn.init.xavier_uniform_(self.W)
 
 class LitSemiSupervisedLSTM(pl.LightningModule):
-    def __init__(self, embeddings, embedding_dim, hidden_dim, num_layers, 
+    def __init__(self, embeddings, f_star, embedding_dim, hidden_dim, num_layers, 
                 lstm_dropout, linear_dropout, arc_dim, lab_dim, num_labels, lr, loss_arg, cle_arg):
         super().__init__()
         self.hidden_dim = hidden_dim
@@ -69,6 +43,7 @@ class LitSemiSupervisedLSTM(pl.LightningModule):
         self.lab_dim = lab_dim
         self.lr = lr
         self.cle = cle_arg
+        self.prior = f_star
 
         self.lstm = LSTM(
             input_size=embedding_dim, 
@@ -158,17 +133,25 @@ class LitSemiSupervisedLSTM(pl.LightningModule):
         arc_scores, lab_scores = self(train_batch)
         batch, maxlen, _ = arc_scores.shape
         lengths = train_batch['lengths']
-
-        potentials = root_to_diagonal(arc_scores)
-        log_potentials = apply_log_softmax(potentials, lengths)
-        dist = NonProjectiveDependencyCRF(log_potentials)
         
+        potentials = self.score_to_diagonal(arc_scores)
+        log_potentials = self.apply_log_softmax(potentials, lengths)
+        dist = NonProjectiveDependencyCRF(log_potentials)
+    
+        assert not torch.isnan(dist.partition).any()
+        assert not torch.isinf(dist.partition).any()
+        assert not torch.isinf(dist.marginals).any()
         assert not torch.isnan(dist.marginals).any()
+        
+        #Z = dist.partition
+        #total_loss = self.partition_loss(torch.clone(potentials), torch.clone(parents), lengths, Z)
+        diag_features = self.feature_to_diagonal(features.float())
+        total_loss = self.GE_loss(dist.marginals, diag_features).mean()
 
-        arc_loss = self.arc_loss(arc_scores, parents)
-        lab_loss = self.lab_loss(lab_scores, parents, labels)
+        # arc_loss = self.arc_loss(arc_scores, parents)
+        # lab_loss = self.lab_loss(lab_scores, parents, labels)
+        # total_loss = arc_loss + lab_loss
 
-        total_loss = arc_loss + lab_loss
         targets = torch.argmax(arc_scores, dim=2)
 
         num_correct = 0
@@ -177,15 +160,15 @@ class LitSemiSupervisedLSTM(pl.LightningModule):
         num_correct += torch.count_nonzero((targets == parents) * (parents != -1))
         total += torch.count_nonzero((parents == parents) * (parents != -1))
         
-        self.log('training_loss', total_loss.detach(), on_step=True, on_epoch=True, logger=True)
-        self.log('training_arc_loss', arc_loss.detach(), on_step=True, on_epoch=True, logger=True)
-        self.log('training_lab_loss', lab_loss.detach(), on_step=True, on_epoch=True, logger=True)
+        #self.log('training_loss', total_loss.detach(), on_step=True, on_epoch=True, logger=True)
+        #self.log('training_arc_loss', arc_loss.detach(), on_step=True, on_epoch=True, logger=True)
+        #self.log('training_lab_loss', lab_loss.detach(), on_step=True, on_epoch=True, logger=True)
 
         return {'loss': total_loss, 
                 'correct': num_correct, 
                 'total': total, 
-                'arc_loss': arc_loss.detach(), 
-                'lab_loss': lab_loss.detach()
+                # 'arc_loss': arc_loss.detach(), 
+                #'lab_loss': lab_loss.detach()
         }
         
     def training_epoch_end(self, outputs):
@@ -198,13 +181,11 @@ class LitSemiSupervisedLSTM(pl.LightningModule):
             correct += output['correct']
             total += output['total']
             loss += output['loss'] / len(outputs)
-            arc_loss += output['arc_loss'] / len(outputs)
-            lab_loss += output['lab_loss'] / len(outputs)
+            # arc_loss += output['arc_loss'] / len(outputs)
+            # lab_loss += output['lab_loss'] / len(outputs)
         
-        self.log_loss.append(loss)
-
         self.log('training_accuracy', correct/total, on_epoch=True, on_step=False, logger=True)
-        print('\nAccuracy after epoch end: {:3.3f} | Arc loss: {:3.3f} | Lab loss: {:3.3f}'.format(correct/total, arc_loss.detach(), lab_loss.detach()))
+        print('\nAccuracy after epoch end: {:3.3f} | GE Loss: {:3.3f}'.format(correct/total, loss))
 
     def validation_step(self, val_batch, batch_idx):
         targets = val_batch['parents']
@@ -281,6 +262,11 @@ class LitSemiSupervisedLSTM(pl.LightningModule):
     def test_epoch_end(self, preds):
         return self.validation_epoch_end(preds)
 
+    def GE_loss(self, scores, features):
+        X = torch.einsum('bij,bijf->bf', scores, features)
+        Y = X - self.prior
+        return 0.5 * (Y.unsqueeze(-1) @ Y.unsqueeze(-1).transpose(-1, -2))
+
     def lab_loss(self, S_lab, parents, labels):
         """Compute the loss for the label predictions on the gold arcs (heads)."""
         heads = torch.clone(parents)
@@ -338,93 +324,78 @@ class LitSemiSupervisedLSTM(pl.LightningModule):
 
         return P
 
-    def loss_function(self, parent_scores, lengths, targets):
-        batch, maxlen, _ = parent_scores.shape
+    def apply_log_softmax(self, scores, lengths):
+        lengths = lengths - torch.ones(len(lengths))
 
-        # create masks to work with 
+        batch, maxlen, _ = scores.shape
         pads = torch.arange(maxlen) >= lengths.unsqueeze(1)
-        mask = pads.unsqueeze(1) | pads.unsqueeze(2)
-        rows = pads.unsqueeze(-1).expand((batch, maxlen, maxlen))
-
-        # set the scores of arcs to padding tokens to a large negative number
-        parent_scores.masked_fill_(mask, -1e9)
-        # set the scores of arcs incoming to root
-        parent_scores[:, :, 0] = -1e9
-        # set the scores of self loops 
-        parent_scores.masked_fill_(torch.eye(maxlen).bool(), -1e9)
-
-        # normalize scores usign softmax
-        _S = F.log_softmax(parent_scores, dim=-1)
-        S = torch.clone(_S)
-
-        # compute the log partition of the graph using MTT
-        Z = self.log_partition(S, lengths)
-
-        S = torch.clone(_S)
-        # set the scores of arcs to padding tokens to 0
-        S.masked_fill_(mask, 0)
-        # set the scores of arcs incoming to root
-        S[:, :, 0] = 0
-        # set the scores of self loops n
-        S.masked_fill_(torch.eye(maxlen).bool(), 0)
-
-        assert maxlen == targets.size(1)
-
-        S = S.reshape((batch * maxlen, maxlen))
-        valid = torch.reshape(targets, (batch * maxlen,))
-
-        masker = valid == -100
-        offset = torch.arange(start=0, end=maxlen * batch, step=maxlen).unsqueeze(-1).expand(-1, maxlen).reshape((batch * maxlen,))
-        indexer = torch.arange(maxlen).repeat(batch, 1).reshape((batch*maxlen,))
-        assert valid.shape == indexer.shape
-        
-        valid[masker] = 0
-        valid = valid + offset
-
-        # get the sum of edges of each target tree in the batch
-        sums = S[valid, indexer].reshape(batch, maxlen)
-
-        # compute the negative log likelihood of each tree
-
-        P = - (sums.sum(dim=-1) - Z)
-        try:
-            assert P.mean() > 0
-        except AssertionError:
-            import ipdb
-            ipdb.post_mortem()
-        return P.mean()
-
-    def log_partition(self, scores, length):
-        batch, slen, slen_ = scores.shape
-        assert slen == slen_
-
-        pads = torch.arange(slen) >= length.unsqueeze(1)
         mask = pads.unsqueeze(1) | pads.unsqueeze(2)
 
         # set the scores of arcs to padding tokens to a large negative number
         scores.masked_fill_(mask, -1e9)
-        # set the scores of arcs incoming to root
-        scores[:, :, 0] = -1e9
-        # set the scores of self loops 
-        scores.masked_fill_(torch.eye(slen).bool(), -1e9)
+        return F.log_softmax(scores, dim=-1)
 
-        max_score, _ = scores.reshape(batch, -1).max(dim=1)
-        weights = (scores - max_score.reshape(batch, 1, 1)).exp() + 1e-8
+    def feature_to_diagonal(self, features):
+        """
+            Turns the feature vector (N+1, N+1, 20) where ROOT is index 0
+            into a feature vector (N, N, 20) where diagonals represent
+            outgoing edges from the root
+        """
+        batch, maxlen, _, dim = features.shape
 
-        weights[:, 0].masked_fill_(pads, 1.)
-        w = weights.masked_fill(torch.eye(slen).bool(), 0)
+        outgoing = features[:, 0, 1:, :]
+        shrink = features[:, 1:, 1:, :]
+        shrink[:, range(maxlen-1), range(maxlen-1), :] = outgoing
+        return shrink
 
-        # Create the Laplacian matrix
-        laplacian = -weights
-        laplacian.masked_fill_(torch.eye(slen).bool(), 0)
-        laplacian += torch.diag_embed(w.sum(dim=1))
+    def score_to_diagonal(self, scores):
+        """
+            Turning a matrix of scores (N+1, N+1) where ROOT is index 0
+            into a matrix of scores (N, N) where diagonals represent
+            outgoing edges from the root
 
-        # Compute log partition with MTT
-        # 
-        # The MTT states that the log partition is equal to the determinant of the matrix 
-        # obtained by removing the first row and column from the Laplacian matrix for the weights
+            e.g. a[ i ][ i ] = score(ROOT -> i)
+        """
+        batch, maxlen, _ = scores.shape
 
-        log_part = laplacian[:, 1:, 1:].logdet()
-        log_part = log_part + (length.float() - 1) * max_score
+        outgoing = scores[:, 0, 1:]
+        shrink = scores[:, 1:, 1:]
+        shrink[:, range(maxlen-1), range(maxlen-1)] = outgoing
+        return shrink
 
-        return log_part
+    def partition_loss(self, scores, targets, lengths, Z):
+        # using scores with ROOT on diagonal
+        lengths = lengths - torch.ones(len(lengths))
+        targets = targets[:, 1:]
+        targets = targets - torch.ones(targets.shape)
+
+        # set the scores of arcs to padding tokens to 0
+        batch, maxlen, _ = scores.shape
+        pads = torch.arange(maxlen) >= lengths.unsqueeze(1)
+        mask = pads.unsqueeze(1) | pads.unsqueeze(2)
+
+        scores.masked_fill_(mask, 0)
+
+        # modify targets such that ROOT is on the diagonal
+        ends = torch.arange(maxlen) >= lengths.unsqueeze(1)
+        mask = torch.logical_and(targets == -1, ~ends)
+        vals = torch.arange(maxlen).expand(batch, -1)
+        targets[mask] = vals[mask].float()  
+        targets[targets == -2] = -1
+        
+        batch_idxs = []
+        row_idxs = []
+        col_idxs = []
+        
+        sums = torch.tensor(0.0)
+
+        for idx in range(batch):
+            row_idxs = targets[idx][:lengths[idx].int()].long()
+            col_idxs = torch.tensor(range(lengths[idx].int())).long()
+            t = torch.tensor(idx)
+            batch_idxs = t.repeat(lengths[idx].int()).long()
+            sum = scores[batch_idxs, row_idxs, col_idxs].reshape(lengths[idx].int()).sum(dim=-1)
+            sums += (-(sum - Z[idx])) / batch
+
+        return sums
+        

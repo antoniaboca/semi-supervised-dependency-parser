@@ -5,6 +5,7 @@ from .data.processor import labelled_padder, unlabelled_padder
 import pytorch_lightning as pl
 from torch.utils.data import DataLoader
 
+import torch
 
 def edge_count(set):
     tree_edges = {}
@@ -104,6 +105,13 @@ class DataModule(pl.LightningDataModule):
         self.test_dataloader = DataLoader(test_set, batch_size=BATCH_SIZE, shuffle=False, collate_fn=labelled_padder)
         self.dev_dataloader = DataLoader(dev_set, batch_size=BATCH_SIZE, shuffle=False, collate_fn=labelled_padder)
 
+    def get_prior(self):
+        vector20 = torch.zeros(20)
+        for key, value in self.order20.items():
+            vector20[value] = self.features20[key]
+
+        return vector20
+        
     def dev_dataloader(self):
         return self.dev_dataloader
 

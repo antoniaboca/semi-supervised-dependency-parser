@@ -3,6 +3,8 @@ import pyconll
 import pyconll.util
 import torch
 from torch.nn.utils.rnn import pack_padded_sequence, pad_sequence 
+from torch.nn import functional as F
+
 from torch.utils.data import Dataset
 
 from allennlp.data.vocabulary import Vocabulary
@@ -233,17 +235,20 @@ def unlabelled_padder(samples):
 
     indexes = [torch.tensor(sent) for sent in indexes]
     tags = [torch.tensor(tag) for tag in tags]
-    features = [torch.tensor(feature) for feature in features]
 
     parents = [torch.tensor(parent) for parent in parents]
     labels = [torch.tensor(label) for label in labels]
 
     padded_sent = pad_sequence(indexes, batch_first=True, padding_value=0)
     padded_tags = pad_sequence(tags, batch_first=True, padding_value=0)
-    
+
     padded_parents = pad_sequence(parents, batch_first=True, padding_value=-1)
     padded_labels = pad_sequence(labels, batch_first=True, padding_value=0)
-    
+
+    maxlen = len(padded_sent[0])
+    padded_features = [F.pad(torch.tensor(feature), (0, 0, 0, maxlen - feature.shape[-2], 0, maxlen - feature.shape[-3])) for feature in features]
+    padded_features = torch.stack(padded_features)
+
     padded_parents[:, 0] = -1
 
     return {
@@ -251,6 +256,6 @@ def unlabelled_padder(samples):
         'tags': padded_tags, 
         'parents': padded_parents,
         'labels': padded_labels,
-        'features': features,
+        'features': padded_features,
         'lengths': sent_lens,
     }
