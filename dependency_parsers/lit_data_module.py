@@ -72,38 +72,58 @@ def feature_vector(order, unlabelled_set):
 class DataModule(pl.LightningDataModule):
     def __init__(self, PICKLE_FILE, BATCH_SIZE, EMBEDDING_DIM,
                 TRAIN_SIZE, VAL_SIZE, TEST_SIZE, args):
+        super().__init__()
 
-        with open(PICKLE_FILE, 'rb') as file:
+        self.semi = args.semi
+        self.TRAIN_SIZE = TRAIN_SIZE
+        self.labelled_size = args.labelled_size
+        self.VAL_SIZE = VAL_SIZE
+        self.TEST_SIZE = TEST_SIZE
+        self.PICKLE_FILE = PICKLE_FILE
+        self.EMBEDDING_DIM = EMBEDDING_DIM
+        self.BATCH_SIZE = BATCH_SIZE
+
+    def prepare_data(self):
+        with open(self.PICKLE_FILE, 'rb') as file:
             object = pickle.load(file)
-            if args.semi:
-                unlabelled_set = object['train_unlabelled'][:TRAIN_SIZE]
-                self.labelled = object['train_labelled'][:args.labelled_size]
-
-                print('Creating prior distribution for the semi-supervised context...')
-                tree_edges, graph_edges = edge_count(self.labelled)
-                self.features20, self.order20 = top20(tree_edges, graph_edges)
-                feature_set = feature_vector(self.order20, unlabelled_set) # this is the training set for the semi-supervised context
-
-                self.unlabelled = [(*a,b) for a, b in zip(unlabelled_set, feature_set)]
-                train_set = self.unlabelled
-
-                padder = unlabelled_padder
+            if self.semi:
+                self.unlabelled_set = object['train_unlabelled'][:self.TRAIN_SIZE]
+                self.labelled_set = object['train_labelled'][:self.labelled_size]
             else:
-                train_set = object['train_labelled'][:TRAIN_SIZE]
-                padder = labelled_padder
-
-            dev_set = object['dev'][:VAL_SIZE]
-            test_set = object['test'][:TEST_SIZE]
+                self.labelled_set = object['train_labelled'][:self.TRAIN_SIZE]
+    
+            self.dev_set = object['dev'][:self.VAL_SIZE]
+            self.test_set = object['test'][:self.TEST_SIZE]
             self.embeddings = object['embeddings']
             self.TAGSET_SIZE = object['TAGSET_SIZE']
             self.LABSET_SIZE = object['LABSET_SIZE']
 
-            assert self.embeddings.shape[-1] == EMBEDDING_DIM, "The embedding dimension does not match the loaded embedding file"
+            assert self.embeddings.shape[-1] == self.EMBEDDING_DIM, "The embedding dimension does not match the loaded embedding file"
 
+    def setup(self, stage):
+        if self.semi:
+            if stage in (None, 'fit'):
+                print('Creating prior distribution for the semi-supervised context...')
+                tree_edges, graph_edges = edge_count(self.labelled_set)
+                self.features20, self.order20 = top20(tree_edges, graph_edges)
+                feature_set = feature_vector(self.order20, self.unlabelled_set) # this is the training set for the semi-supervised context
+                    
+                self.unlabelled_set = [(*a,b) for a, b in zip(self.unlabelled_set, feature_set)]
+    
+    def train_dataloader(self):
+        if not self.semi:
+            return DataLoader(self.labelled_set, batch_size=self.BATCH_SIZE, shuffle=False, collate_fn=labelled_padder)
+        
+        labelled = DataLoader(self.labelled_set, batch_size=self.labelled_size, shuffle=False, collate_fn=labelled_padder)
+        unlabelled = DataLoader(self.unlabelled_set, batch_size=self.BATCH_SIZE, shuffle=False, collate_fn=unlabelled_padder)
 
-        self.train_dataloader = DataLoader(train_set, batch_size=BATCH_SIZE, shuffle=False, collate_fn=padder)
-        self.test_dataloader = DataLoader(test_set, batch_size=BATCH_SIZE, shuffle=False, collate_fn=labelled_padder)
-        self.dev_dataloader = DataLoader(dev_set, batch_size=BATCH_SIZE, shuffle=False, collate_fn=labelled_padder)
+        return {'labelled': labelled, 'unlabelled': unlabelled}
+
+    def val_dataloader(self):
+        return DataLoader(self.dev_set, batch_size=self.BATCH_SIZE, shuffle=False, collate_fn=labelled_padder)
+  
+    def test_dataloader(self):
+        return DataLoader(self.test_set, batch_size=self.BATCH_SIZE, shuffle=False, collate_fn=labelled_padder)
 
     def get_prior(self):
         vector20 = torch.zeros(20)
@@ -111,12 +131,5 @@ class DataModule(pl.LightningDataModule):
             vector20[value] = self.features20[key]
 
         return vector20
-        
-    def dev_dataloader(self):
-        return self.dev_dataloader
 
-    def train_dataloader(self):
-        return self.train_dataloader
-
-    def test_dataloader(self):
-        return self.test_dataloader
+    

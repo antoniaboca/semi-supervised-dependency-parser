@@ -21,8 +21,9 @@ def main():
     model.add_argument('--file', type=str, default='dependency_parsers/data/cache.pickle', help='File with the embedded set')
     model.add_argument('--cle', action='store_true', help='Use the chuliu-edmonds algorithm to create trees for testing phase')
     model.add_argument('--semi', action='store_true', help='Use the semi-supervised dependency parser')
-    model.add_argument('-labelled-size', type=int, default=20000, help='Number of labelled sentences in the semi-supervised context')
-
+    model.add_argument('--labelled-size', type=int, default=20000, help='Number of labelled sentences in the semi-supervised context')
+    model.add_argument('--semi-labelled-batch', type=int, default=8, help='Number of labelled sentences in a batch for the semi supervised context')
+    
     data = parser.add_argument_group('Dataset size')
     data.add_argument('--train', type=int, default=20000, help='Max amount of sentences to load for training')
     data.add_argument('--validation', type=int, default=4000, help='Maximum sentences to load for validation')

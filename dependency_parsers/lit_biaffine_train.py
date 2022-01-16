@@ -25,6 +25,8 @@ def biaffine_train(args):
     module = DataModule(DATA_FILE, BATCH_SIZE, EMBEDDING_DIM, 
                         TRAIN_SIZE, VAL_SIZE, TEST_SIZE, args)
 
+    module.prepare_data()
+    module.setup(stage='fit')
     TAGSET = module.TAGSET_SIZE
     LABSET = module.LABSET_SIZE
     embeddings = module.embeddings
@@ -38,15 +40,15 @@ def biaffine_train(args):
     if args.model_name is not None:
         logger = pl.loggers.TensorBoardLogger('train_size_logs/', sub_dir=args.model_name)
         
-    trainer = pl.Trainer(max_epochs=NUM_EPOCH, logger=logger, log_every_n_steps=10, flush_logs_every_n_steps=50, callbacks=[early_stop])
-    trainer.fit(model, module.train_dataloader, module.dev_dataloader)
+    trainer = pl.Trainer(max_epochs=NUM_EPOCH, logger=logger, log_every_n_steps=10, flush_logs_every_n_steps=50,callbacks=[early_stop])
+    trainer.fit(model, module)
 
     #import matplotlib.pyplot as plt
     #plt.plot(model.log_loss)
     #plt.show()
 
     print('TESTING...')
-    results = trainer.test(model, module.test_dataloader, verbose=True)
+    results = trainer.test(model, module, verbose=True)
     print(results)
 
 def size_loop(args):

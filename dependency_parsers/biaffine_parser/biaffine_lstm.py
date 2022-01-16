@@ -38,6 +38,8 @@ class LitLSTM(pl.LightningModule):
     def __init__(self, embeddings, embedding_dim, hidden_dim, num_layers, 
                 lstm_dropout, linear_dropout, arc_dim, lab_dim, num_labels, lr, loss_arg, cle_arg):
         super().__init__()
+
+        self.save_hyperparameters()
         self.hidden_dim = hidden_dim
         self.arc_dim = arc_dim
         self.lab_dim = lab_dim
