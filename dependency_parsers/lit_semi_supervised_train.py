@@ -37,7 +37,7 @@ def semisupervised_train(args):
     transfer = LitSemiTransferLSTM(args, prior)
 
     model = LitSemiSupervisedLSTM(embeddings, prior, EMBEDDING_DIM, HIDDEN_DIM, NUM_LAYERS, LSTM_DROPOUT, LINEAR_DROPOUT,
-                    ARC_DIM, LAB_DIM, LABSET, LR, 'cross', args.cle)
+                    ARC_DIM, LAB_DIM, LABSET, LR, 'cross', args.cle, args.ge_only)
 
     early_stop = pl.callbacks.EarlyStopping(monitor='validation_loss', min_delta=0.01, patience=5, mode='min')
     
@@ -46,11 +46,7 @@ def semisupervised_train(args):
         logger = pl.loggers.TensorBoardLogger('semisupervised_size_logs/', sub_dir=args.model_name)
         
     trainer = pl.Trainer(max_epochs=NUM_EPOCH, logger=logger, log_every_n_steps=10, flush_logs_every_n_steps=50, callbacks=[early_stop])
-    trainer.fit(transfer, module)
-
-    #import matplotlib.pyplot as plt
-    #plt.plot(model.log_loss)
-    #plt.show()
+    trainer.fit(model, module)
 
     print('TESTING...')
     results = trainer.test(model, module, verbose=True)

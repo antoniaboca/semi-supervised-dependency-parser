@@ -18,10 +18,12 @@ class SentenceDataset(Dataset):
         
         words = {}
         pos_tags = {}
+        adv_tags = {}
         label = {}
 
         words[ROOT_TOKEN] = 0
         pos_tags[ROOT_TAG] = 0
+        adv_tags[ROOT_TAG] = 0
         label[ROOT_LABEL] = 0
 
         data = pyconll.load_from_file(file)
@@ -36,11 +38,13 @@ class SentenceDataset(Dataset):
             
             word_list = [ROOT_TOKEN]
             tag_list = [ROOT_TAG]
+            adv_list = [ROOT_TAG]
             parents = [0]
             labels = [ROOT_LABEL]
 
             words[ROOT_TOKEN] += 1
             pos_tags[ROOT_TAG] += 1
+            adv_tags[ROOT_TAG] += 1
             label[ROOT_LABEL] += 1
 
             for token in sentence:
@@ -65,6 +69,12 @@ class SentenceDataset(Dataset):
                     pos_tags[token.upos] = 1
                 tag_list.append(token.upos)
 
+                if token.xpos in adv_tags:
+                    adv_tags[token.xpos] += 1
+                else:
+                    adv_tags[token.xpos] = 1
+                adv_list.append(token.xpos)
+
                 if token.deprel in label:
                     label[token.deprel] += 1
                 else:
@@ -73,7 +83,7 @@ class SentenceDataset(Dataset):
                 labels.append(token.deprel)
                 
             
-            self.sentences.append((word_list, tag_list, parents, labels))
+            self.sentences.append((word_list, tag_list, adv_list, parents, labels))
             self.parent_ids.append(parents)
 
         if vocab is None:
@@ -81,6 +91,7 @@ class SentenceDataset(Dataset):
                 counter={
                     'words': words, 
                     'pos_tag': pos_tags, 
+                    'adv_tag': adv_tags,
                     'label': label
                     }
             )
@@ -90,24 +101,29 @@ class SentenceDataset(Dataset):
 
         self.index_to_word = self.vocabulary.get_index_to_token_vocabulary(namespace='words')
         self.index_to_pos = self.vocabulary.get_index_to_token_vocabulary(namespace='pos_tag')
+        self.index_to_xpos = self.vocabulary.get_index_to_token_vocabulary(namespace='adv_tag')
         self.index_to_label = self.vocabulary.get_index_to_token_vocabulary(namespace='label')
 
         self.word_to_index = self.vocabulary.get_token_to_index_vocabulary(namespace='words')
         self.pos_to_index = self.vocabulary.get_token_to_index_vocabulary(namespace='pos_tag')
+        self.xpos_to_index = self.vocabulary.get_token_to_index_vocabulary(namespace='adv_tag')
         self.label_to_index = self.vocabulary.get_token_to_index_vocabulary(namespace='label')
 
         self.index_set = []
         self.tag_set = []
+        self.xpos_set = []
         self.parent_set = []
         self.label_set = []
 
-        for sentence, tags, parents, labels in self.sentences:
+        for sentence, tags, xpos, parents, labels in self.sentences:
             sidxs = [self.vocabulary.get_token_index(w, 'words') for w in sentence]
             tidxs = [self.vocabulary.get_token_index(t, 'pos_tag') for t in tags]
+            xidxs = [self.vocabulary.get_token_index(x, 'adv_tag') for x in xpos]
             lidxs = [self.vocabulary.get_token_index(l, 'label') for l in labels]
 
             self.index_set.append(sidxs)
             self.tag_set.append(tidxs)
+            self.xpos_set.append(xidxs)
             self.parent_set.append(parents)
             self.label_set.append(lidxs)
 
@@ -121,6 +137,7 @@ class SentenceDataset(Dataset):
         sample = (
             self.index_set[index], 
             self.tag_set[index], 
+            self.xpos_set[index],
             self.parent_set[index], 
             self.label_set[index]
         )
@@ -191,27 +208,29 @@ class Embed(object):
         self.embeddings = embeddings
     
     def __call__(self, sample):
-        sentence, tags, parents = sample
+        sentence, tags, xpos, parents = sample
         embedded = [self.embeddings[idx] for idx in sentence]
 
-        return (sentence, embedded, tags, parents)
+        return (sentence, embedded, tags, xpos, parents)
 
 def labelled_padder(samples):
     # batch of samples to be expected to look like
-    # [(index_sent1, tag_set1, parent_set1, label_set1), ...]
+    # [(index_sent1, tag_set1, xpos_set1, parent_set1, label_set1), ...]
 
     #import ipdb; ipdb.set_trace()
-    indexes, tags, parents, labels = zip(*samples)
+    indexes, tags, xpos, parents, labels = zip(*samples)
 
     sent_lens = torch.tensor([len(sent) for sent in indexes])
 
     indexes = [torch.tensor(sent) for sent in indexes]
     tags = [torch.tensor(tag) for tag in tags]
+    xpos = [torch.tensor(pos) for pos in xpos]
     parents = [torch.tensor(parent) for parent in parents]
     labels = [torch.tensor(label) for label in labels]
 
     padded_sent = pad_sequence(indexes, batch_first=True, padding_value=0)
     padded_tags = pad_sequence(tags, batch_first=True, padding_value=0)
+    padded_xpos = pad_sequence(xpos, batch_first=True, padding_value=0)
     padded_parents = pad_sequence(parents, batch_first=True, padding_value=-1)
     padded_labels = pad_sequence(labels, batch_first=True, padding_value=0)
     
@@ -219,7 +238,8 @@ def labelled_padder(samples):
 
     return {
         'sentence': padded_sent, 
-        'tags': padded_tags, 
+        'tags': padded_tags,
+        'xpos': padded_xpos,
         'parents': padded_parents, 
         'lengths': sent_lens,
         'labels': padded_labels,
@@ -229,18 +249,20 @@ def unlabelled_padder(samples):
     # batch of samples to be expected to look like
     # [(idxs1, tags1, features1), ...]
 
-    indexes, tags, parents, labels, features = zip(*samples)
+    indexes, tags, xpos, parents, labels, features = zip(*samples)
 
     sent_lens = torch.tensor([len(sent) for sent in indexes])
 
     indexes = [torch.tensor(sent) for sent in indexes]
     tags = [torch.tensor(tag) for tag in tags]
+    xpos = [torch.tensor(pos) for pos in xpos]
 
     parents = [torch.tensor(parent) for parent in parents]
     labels = [torch.tensor(label) for label in labels]
 
     padded_sent = pad_sequence(indexes, batch_first=True, padding_value=0)
     padded_tags = pad_sequence(tags, batch_first=True, padding_value=0)
+    padded_xpos = pad_sequence(xpos, batch_first=True, padding_value=0)
 
     padded_parents = pad_sequence(parents, batch_first=True, padding_value=-1)
     padded_labels = pad_sequence(labels, batch_first=True, padding_value=0)
@@ -248,12 +270,13 @@ def unlabelled_padder(samples):
     maxlen = len(padded_sent[0])
     padded_features = [F.pad(torch.tensor(feature), (0, 0, 0, maxlen - feature.shape[-2], 0, maxlen - feature.shape[-3])) for feature in features]
     padded_features = torch.stack(padded_features)
-
+    
     padded_parents[:, 0] = -1
 
     return {
         'sentence': padded_sent, 
         'tags': padded_tags, 
+        'xpos': padded_xpos,
         'parents': padded_parents,
         'labels': padded_labels,
         'features': padded_features,

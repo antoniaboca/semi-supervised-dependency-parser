@@ -63,11 +63,11 @@ def file_save(args):
 
 def create_buckets(set):
     buckets = {}
-    for sentence, tag, parent, label in set:
+    for sentence, tag, xpos, parent, label in set:
         val = len(sentence)
         if val not in buckets.keys():
             buckets[val] = deque()
-        buckets[val].append((sentence, tag, parent, label))
+        buckets[val].append((sentence, tag, xpos, parent, label))
     return buckets
 
 def bucket_save(train_buckets, loaded, file_name, size):
@@ -110,7 +110,7 @@ def bucket_unlabelled_save(train_buckets, loaded, file_name, size):
     unlabelled_set = remainder
     rand.shuffle(unlabelled_set)
 
-    for _, tags, _, _ in unlabelled_set:
+    for _, tags, _, _, _ in unlabelled_set:
         for tag in tags:
             assert tag < 20
 

@@ -1,5 +1,6 @@
 from torch._C import set_flush_denormal
 from torch.nn.modules import linear
+from dependency_parsers.data.processor import PAD_VALUE, unlabelled_padder
 import torchmetrics
 
 import torch
@@ -36,7 +37,7 @@ class Biaffine(nn.Module):
 
 class LitSemiSupervisedLSTM(pl.LightningModule):
     def __init__(self, embeddings, f_star, embedding_dim, hidden_dim, num_layers, 
-                lstm_dropout, linear_dropout, arc_dim, lab_dim, num_labels, lr, loss_arg, cle_arg):
+                lstm_dropout, linear_dropout, arc_dim, lab_dim, num_labels, lr, loss_arg, cle_arg, ge_only):
         super().__init__()
 
         self.hidden_dim = hidden_dim
@@ -45,6 +46,7 @@ class LitSemiSupervisedLSTM(pl.LightningModule):
         self.lr = lr
         self.cle = cle_arg
         self.prior = f_star
+        self.ge_only = ge_only
 
         self.lstm = LSTM(
             input_size=embedding_dim, 
@@ -153,12 +155,12 @@ class LitSemiSupervisedLSTM(pl.LightningModule):
         diag_features = self.feature_to_diagonal(features.float())
         unlabelled_loss = self.GE_loss(dist.marginals, diag_features).mean()
 
-        # arc_loss = self.arc_loss(arc_scores, parents)
-        # lab_loss = self.lab_loss(lab_scores, parents, labels)
-        # total_loss = arc_loss + lab_loss
+        self.log('unlabelled_loss', unlabelled_loss.detach(), on_step=True, on_epoch=True, logger=True)
 
-        #self.log('training_arc_loss', arc_loss.detach(), on_step=True, on_epoch=True, logger=True)
-        #self.log('training_lab_loss', lab_loss.detach(), on_step=True, on_epoch=True, logger=True)
+        if self.ge_only:
+            return {
+                'loss': unlabelled_loss
+            }
 
         # COMPUTE LOSS FOR LABELLED DATA
         l_arc_scores, l_lab_scores = self(labelled)
@@ -181,6 +183,8 @@ class LitSemiSupervisedLSTM(pl.LightningModule):
         total += torch.count_nonzero((parents == parents) * (parents != -1))
         
         self.log('training_loss', total_loss.detach(), on_step=True, on_epoch=True, logger=True)
+        #self.log('training_arc_loss', arc_loss.detach(), on_step=True, on_epoch=True, logger=True)
+        #self.log('training_lab_loss', lab_loss.detach(), on_step=True, on_epoch=True, logger=True)
         
         return {'loss': total_loss, 
                 'correct': num_correct, 
@@ -198,16 +202,17 @@ class LitSemiSupervisedLSTM(pl.LightningModule):
         labelled = 0.0
         unlabelled = 0.0
         for output in outputs:
-            correct += output['correct']
-            total += output['total']
             loss += output['loss'] / len(outputs)
-            # arc_loss += output['arc_loss'] / len(outputs)
-            # lab_loss += output['lab_loss'] / len(outputs)
-            labelled += output['labelled_loss'] / len(outputs)
-            unlabelled += output['unlabelled_loss'] / len(outputs)
-        
-        self.log('training_accuracy', correct/total, on_epoch=True, on_step=False, logger=True)
-        print('\nAccuracy on labelled data: {:3.3f} | GE Loss: {:3.3f} | Labelled loss: {:3.3f}'.format(correct/total, unlabelled, labelled))
+
+            if not self.ge_only:
+                labelled += output['labelled_loss'] / len(outputs)
+                unlabelled += output['unlabelled_loss'] / len(outputs)
+                correct += output['correct']
+                total += output['total']
+            
+        if not self.ge_only:
+            self.log('training_accuracy', correct/total, on_epoch=True, on_step=False, logger=True)
+            print('\nAccuracy on labelled data: {:3.3f} | GE Loss: {:3.3f} | Labelled loss: {:3.3f}'.format(correct/total, unlabelled, labelled))
 
     def validation_step(self, val_batch, batch_idx):
         targets = val_batch['parents']
