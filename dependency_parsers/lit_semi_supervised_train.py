@@ -1,4 +1,6 @@
 from torch.nn.modules.loss import CrossEntropyLoss
+
+from dependency_parsers.semi_supervised_parser.entropy_lstm import LitEntropyLSTM
 from .lit_data_module import DataModule
 from .semi_supervised_parser.semi_supervised_lstm import LitSemiSupervisedLSTM
 from .semi_supervised_parser.transfer_learning import LitSemiTransferLSTM
@@ -37,6 +39,9 @@ def semisupervised_train(args):
     transfer = LitSemiTransferLSTM(args, prior)
 
     model = LitSemiSupervisedLSTM(embeddings, prior, EMBEDDING_DIM, HIDDEN_DIM, NUM_LAYERS, LSTM_DROPOUT, LINEAR_DROPOUT,
+                    ARC_DIM, LAB_DIM, LABSET, LR, 'cross', args.cle, args.ge_only)
+    
+    entropy = LitEntropyLSTM(embeddings, prior, EMBEDDING_DIM, HIDDEN_DIM, NUM_LAYERS, LSTM_DROPOUT, LINEAR_DROPOUT,
                     ARC_DIM, LAB_DIM, LABSET, LR, 'cross', args.cle, args.ge_only)
 
     early_stop = pl.callbacks.EarlyStopping(monitor='validation_loss', min_delta=0.01, patience=5, mode='min')

@@ -126,8 +126,10 @@ class DataModule(pl.LightningDataModule):
                         self.order20[idx_key] = order20[key]
                     
                 feature_set = feature_vector(self.order20, self.unlabelled_set) # this is the training set for the semi-supervised context
-                    
                 self.unlabelled_set = [(*a,b) for a, b in zip(self.unlabelled_set, feature_set)]
+
+                feature_val = feature_vector(self.order20, self.dev_set)
+                self.dev_set = [(*a, b) for a, b in zip(self.dev_set, feature_val)]
     
     def train_dataloader(self):
         if not self.semi:
@@ -139,7 +141,7 @@ class DataModule(pl.LightningDataModule):
         return {'labelled': labelled, 'unlabelled': unlabelled}
 
     def val_dataloader(self):
-        return DataLoader(self.dev_set, batch_size=self.BATCH_SIZE, shuffle=False, collate_fn=labelled_padder)
+        return DataLoader(self.dev_set, batch_size=self.BATCH_SIZE, shuffle=False, collate_fn=unlabelled_padder)
   
     def test_dataloader(self):
         return DataLoader(self.test_set, batch_size=self.BATCH_SIZE, shuffle=False, collate_fn=labelled_padder)

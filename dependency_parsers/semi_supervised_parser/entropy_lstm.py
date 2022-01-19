@@ -1,3 +1,4 @@
+from cmath import inf
 from torch._C import set_flush_denormal
 from torch.nn.modules import linear
 from dependency_parsers.data.processor import PAD_VALUE, unlabelled_padder
@@ -7,12 +8,10 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
-import torch.nn.functional as F
+
 
 from torch.nn.utils.rnn import pad_sequence, pad_packed_sequence, pack_padded_sequence
 from torch.nn import Linear, LSTM
-
-from numpy import inf
 
 from torch_struct import NonProjectiveDependencyCRF
 
@@ -37,7 +36,7 @@ class Biaffine(nn.Module):
     def reset_parameters(self):
         nn.init.xavier_uniform_(self.W)
 
-class LitSemiSupervisedLSTM(pl.LightningModule):
+class LitEntropyLSTM(pl.LightningModule):
     def __init__(self, embeddings, f_star, embedding_dim, hidden_dim, num_layers, 
                 lstm_dropout, linear_dropout, arc_dim, lab_dim, num_labels, lr, loss_arg, cle_arg, ge_only):
         super().__init__()
@@ -49,6 +48,7 @@ class LitSemiSupervisedLSTM(pl.LightningModule):
         self.cle = cle_arg
         self.prior = f_star
         self.ge_only = ge_only
+        self.log_softmax = nn.LogSoftmax(dim=-1)
 
         self.lstm = LSTM(
             input_size=embedding_dim, 
@@ -135,8 +135,6 @@ class LitSemiSupervisedLSTM(pl.LightningModule):
         labelled = batch['labelled']
 
         features = unlabelled['features']
-        #parents = unlabelled['parents']
-        #labels = unlabelled['labels']
 
         # COMPUTE LOSS FOR UNLABELLED DATA
         arc_scores, lab_scores = self(unlabelled)
@@ -145,17 +143,23 @@ class LitSemiSupervisedLSTM(pl.LightningModule):
         
         potentials = self.score_to_diagonal(arc_scores)
         log_potentials = self.apply_log_softmax(potentials, lengths)
+
+        try:
+            assert torch.all(log_potentials <= 0)
+        except AssertionError:
+            import ipdb; ipdb.post_mortem()
+
         dist = NonProjectiveDependencyCRF(log_potentials, lengths - torch.ones(len(lengths)))
-    
+
         assert not torch.isnan(dist.partition).any()
         assert not torch.isinf(dist.partition).any()
         assert not torch.isinf(dist.marginals).any()
         assert not torch.isnan(dist.marginals).any()
-        
+
         #Z = dist.partition
         #total_loss = self.partition_loss(torch.clone(potentials), torch.clone(parents), lengths, Z)
-        diag_features = self.feature_to_diagonal(features.float())
-        unlabelled_loss = self.GE_loss(dist.marginals, diag_features).mean()
+        #diag_features = self.feature_to_diagonal(features.float())
+        unlabelled_loss = self.entropy_loss(dist.marginals, torch.clone(-log_potentials))
 
         self.log('unlabelled_loss', unlabelled_loss.detach(), on_step=True, on_epoch=True, logger=True)
 
@@ -219,28 +223,14 @@ class LitSemiSupervisedLSTM(pl.LightningModule):
     def validation_step(self, val_batch, batch_idx):
         targets = val_batch['parents']
         labels = val_batch['labels']
-        lengths = val_batch['lengths']
-        features = val_batch['features']
-
+        
         batch, maxlen = targets.shape
         arc_scores, lab_scores = self(val_batch)
-
-        potentials = self.score_to_diagonal(arc_scores)
-        log_potentials = self.apply_log_softmax(potentials, lengths)
-        dist = NonProjectiveDependencyCRF(log_potentials, lengths - torch.ones(len(lengths)))
-
-        assert not torch.isnan(dist.partition).any()
-        assert not torch.isinf(dist.partition).any()
-        assert not torch.isinf(dist.marginals).any()
-        assert not torch.isnan(dist.marginals).any()
-
-        diag_features = self.feature_to_diagonal(features.float())
-        unlabelled_loss = self.GE_loss(dist.marginals, diag_features).mean()
 
         arc_loss = self.arc_loss(arc_scores,targets)
         lab_loss = self.lab_loss(lab_scores, targets, labels)
 
-        total_loss = unlabelled_loss
+        total_loss = arc_loss + lab_loss
         num_correct = 0
         total = 0
         
@@ -310,6 +300,12 @@ class LitSemiSupervisedLSTM(pl.LightningModule):
         Y = X - self.prior
         return 0.5 * (Y.unsqueeze(-2) @ Y.unsqueeze(-1)).squeeze(-1).squeeze(-1)
 
+    def entropy_loss(self, marginals, scores):
+        mask = scores == inf
+        masked = scores.masked_fill(mask, 0.0)
+        X = torch.einsum('bij,bij->b', marginals, masked).sum()
+        return X
+
     def lab_loss(self, S_lab, parents, labels):
         """Compute the loss for the label predictions on the gold arcs (heads)."""
         heads = torch.clone(parents)
@@ -376,9 +372,9 @@ class LitSemiSupervisedLSTM(pl.LightningModule):
 
         # set the scores of arcs to padding tokens to a large negative number
         scores.masked_fill_(mask, -1e9)
-        
-        aux = F.log_softmax(scores, dim=-1)
+        aux = self.log_softmax(scores)
         mask = aux <= -1e6
+        # aux.masked_fill_(mask, -inf)
         return aux.masked_fill(mask, -inf)
 
     def feature_to_diagonal(self, features):
