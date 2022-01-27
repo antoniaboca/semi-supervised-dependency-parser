@@ -18,16 +18,21 @@ from stanza.models.common.chuliu_edmonds import chuliu_edmonds_one_root
 import pytorch_lightning as pl
 
 class Biaffine(nn.Module):
-    def __init__(self, arc_dim, output_dim):
+    def __init__(self, arc_dim, output_dim, from_pretrained=None):
         super().__init__()
-
-        self.W = nn.Parameter(torch.Tensor(output_dim, arc_dim, arc_dim))
-        self.reset_parameters()
+        if from_pretrained is None:
+            self.W = nn.Parameter(torch.Tensor(output_dim, arc_dim, arc_dim))
+            self.reset_parameters()
+        
+        else:
+            if type(from_pretrained) is not torch.Tensor:
+                from_pretrained = torch.tensor(from_pretrained)
+            assert from_pretrained.shape == (output_dim, arc_dim, arc_dim)
+            self.W = nn.Parameter(from_pretrained)
 
     def forward(self, head, dep):
         head = head.unsqueeze(1)
         dep = dep.unsqueeze(1)
-
         scores = head @ self.W @ dep.transpose(-1,-2)
         return scores.squeeze(1)
 
