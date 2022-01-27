@@ -35,11 +35,12 @@ def semisupervised_train(args):
     LABSET = module.LABSET_SIZE
     embeddings = module.embeddings
     prior = module.get_prior()
-
+    order20 = module.order20
+    vocab = module.vocabulary
     transfer = LitSemiTransferLSTM(args, prior)
 
     model = LitSemiSupervisedLSTM(embeddings, prior, EMBEDDING_DIM, HIDDEN_DIM, NUM_LAYERS, LSTM_DROPOUT, LINEAR_DROPOUT,
-                    ARC_DIM, LAB_DIM, LABSET, LR, 'cross', args.cle, args.ge_only)
+                    ARC_DIM, LAB_DIM, LABSET, LR, 'cross', args.cle, args.ge_only, vocab, order20)
     
     entropy = LitEntropyLSTM(embeddings, prior, EMBEDDING_DIM, HIDDEN_DIM, NUM_LAYERS, LSTM_DROPOUT, LINEAR_DROPOUT,
                     ARC_DIM, LAB_DIM, LABSET, LR, 'cross', args.cle, args.ge_only)

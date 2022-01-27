@@ -105,12 +105,12 @@ class LitLSTM(pl.LightningModule):
         lstm_out, _ = pad_packed_sequence(lstm_out, batch_first=True)
         
         # arcs
-        h_arc = self.dropout(F.relu(self.arc_linear_h(lstm_out)))
-        d_arc = self.dropout(F.relu(self.arc_linear_d(lstm_out)))
+        h_arc = self.dropout(F.leaky_relu(self.arc_linear_h(lstm_out)))
+        d_arc = self.dropout(F.leaky_relu(self.arc_linear_d(lstm_out)))
 
         # labels
-        h_lab = self.dropout(F.relu(self.lab_linear_h(lstm_out)))
-        d_lab = self.dropout(F.relu(self.lab_linear_d(lstm_out)))
+        h_lab = self.dropout(F.leaky_relu(self.lab_linear_h(lstm_out)))
+        d_lab = self.dropout(F.leaky_relu(self.lab_linear_d(lstm_out)))
 
         # arc scores
         h_score_arc = self.arc_score_h(h_arc)

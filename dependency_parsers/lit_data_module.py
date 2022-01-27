@@ -56,10 +56,10 @@ def top20(tree, graph):
 
 def feature_vector(order, unlabelled_set):
     if len(unlabelled_set) > 0:
-        assert len(unlabelled_set[0]) == 5 # I assume an unlabelled tuple has word indexes, tags, xpos, parents, labels and feature vectors
+        assert len(unlabelled_set[0]) == 6 # I assume an unlabelled tuple has word indexes, tags, xpos, parents, labels and feature vectors
         
     feature_list = []
-    for idxs, _, xpos, _, _ in unlabelled_set:
+    for idxs, _, xpos, _, _, _ in unlabelled_set:
         vec = np.zeros((len(xpos), len(xpos), len(order)), dtype=np.int32)
         for idx1 in range(len(xpos)):
             for idx2 in range(len(xpos)):
@@ -125,10 +125,28 @@ class DataModule(pl.LightningDataModule):
                         self.features20[idx_key] = value
                         self.order20[idx_key] = order20[key]
                     
+                oracle = 0
+                totals = 0
+                for _, _, xpos, parents, _, word_tags in self.unlabelled_set:
+                    for idx in range(1, len(parents)):
+                        head = xpos[parents[idx]]
+                        dep = xpos[idx]
+
+                        try:
+                            assert xpos[idx] == self.vocabulary.get_token_index(word_tags[idx], namespace='adv_tag')
+                            assert self.vocabulary.get_token_from_index(xpos[idx], namespace='adv_tag') == word_tags[idx]
+                        except:
+                            import ipdb; ipdb.post_mortem()
+
+                        if (head,dep) in self.features20:
+                            oracle += 1
+                        totals += 1
+                print('\n Percentage of target edges that are oracle edges: {:3.3f}\n'.format(oracle/totals))
+                    
                 feature_set = feature_vector(self.order20, self.unlabelled_set) # this is the training set for the semi-supervised context
                 self.unlabelled_set = [(*a,b) for a, b in zip(self.unlabelled_set, feature_set)]
 
-                feature_val = feature_vector(self.order20, self.dev_set)
+                feature_val = feature_vector(self.order20, self.dev_set)                
                 self.dev_set = [(*a, b) for a, b in zip(self.dev_set, feature_val)]
     
     def train_dataloader(self):
@@ -141,6 +159,8 @@ class DataModule(pl.LightningDataModule):
         return {'labelled': labelled, 'unlabelled': unlabelled}
 
     def val_dataloader(self):
+        if not self.semi:
+            return DataLoader(self.dev_set, batch_size=self.BATCH_SIZE, shuffle=False, collate_fn=labelled_padder)
         return DataLoader(self.dev_set, batch_size=self.BATCH_SIZE, shuffle=False, collate_fn=unlabelled_padder)
   
     def test_dataloader(self):

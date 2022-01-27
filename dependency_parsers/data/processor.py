@@ -56,8 +56,8 @@ class SentenceDataset(Dataset):
                 if token.lemma is None or token.upos is None or token.deprel is None:
                     continue
 
-                word = token.lemma.lower()
-                if token.lemma in words:
+                word = token.form.lower()
+                if word in words:
                     words[word] += 1
                 else:
                     words[word] = 1
@@ -114,6 +114,7 @@ class SentenceDataset(Dataset):
         self.xpos_set = []
         self.parent_set = []
         self.label_set = []
+        self.word_tag_set = []
 
         for sentence, tags, xpos, parents, labels in self.sentences:
             sidxs = [self.vocabulary.get_token_index(w, 'words') for w in sentence]
@@ -126,6 +127,8 @@ class SentenceDataset(Dataset):
             self.xpos_set.append(xidxs)
             self.parent_set.append(parents)
             self.label_set.append(lidxs)
+            self.word_tag_set.append(xpos)
+
 
     def __len__(self):
         return len(self.index_set)
@@ -139,7 +142,8 @@ class SentenceDataset(Dataset):
             self.tag_set[index], 
             self.xpos_set[index],
             self.parent_set[index], 
-            self.label_set[index]
+            self.label_set[index],
+            self.word_tag_set[index]
         )
 
         if self.transform:
@@ -171,26 +175,23 @@ class EmbeddingDataset(Dataset):
                 tokens = line.split()
                 word = tokens[0]
                 embeds = []
+                
+                assert len(tokens) == dim + 1, "Dimension given does not match dimension in file"
+
                 for idx in range(1, dim + 1):
                     embeds.append(float(tokens[idx]))
                 
                 self.embeddings[word] = np.asarray(embeds)
 
-        #indexed = np.random.rand(len(words_to_index), self.dim)
         indexed = np.zeros((len(words_to_index), self.dim), dtype=np.float64)
-
-        #for word, values in self.embeddings.items():
-        #    if word in words_to_index:
-        #        indexed[words_to_index[word]] = values
-        #        count -= 1
-
-        missing = []
+        
+        self.missing = []
         for word, index in words_to_index.items():
             if word in self.embeddings:
                 values = self.embeddings[word]
                 indexed[index] = values
             else:
-                missing.append(word)
+                self.missing.append(word)
         
         self.idx_embeds = indexed
     
@@ -215,10 +216,10 @@ class Embed(object):
 
 def labelled_padder(samples):
     # batch of samples to be expected to look like
-    # [(index_sent1, tag_set1, xpos_set1, parent_set1, label_set1), ...]
+    # [(index_sent1, tag_set1, xpos_set1, parent_set1, label_set1, word_tag_set1), ...]
 
     #import ipdb; ipdb.set_trace()
-    indexes, tags, xpos, parents, labels = zip(*samples)
+    indexes, tags, xpos, parents, labels, word_tags = zip(*samples)
 
     sent_lens = torch.tensor([len(sent) for sent in indexes])
 
@@ -243,13 +244,14 @@ def labelled_padder(samples):
         'parents': padded_parents, 
         'lengths': sent_lens,
         'labels': padded_labels,
+        'word_tags': word_tags,
     }
 
 def unlabelled_padder(samples):
     # batch of samples to be expected to look like
     # [(idxs1, tags1, features1), ...]
 
-    indexes, tags, xpos, parents, labels, features = zip(*samples)
+    indexes, tags, xpos, parents, labels, word_tags, features = zip(*samples)
 
     sent_lens = torch.tensor([len(sent) for sent in indexes])
 
@@ -281,4 +283,5 @@ def unlabelled_padder(samples):
         'labels': padded_labels,
         'features': padded_features,
         'lengths': sent_lens,
+        'word_tags': word_tags,
     }

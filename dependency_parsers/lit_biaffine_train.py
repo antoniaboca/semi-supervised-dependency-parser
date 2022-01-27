@@ -43,10 +43,6 @@ def biaffine_train(args):
     trainer = pl.Trainer(max_epochs=NUM_EPOCH, logger=logger, log_every_n_steps=10, flush_logs_every_n_steps=50,callbacks=[early_stop])
     trainer.fit(model, module)
 
-    #import matplotlib.pyplot as plt
-    #plt.plot(model.log_loss)
-    #plt.show()
-
     print('TESTING...')
     results = trainer.test(model, module, verbose=True)
     print(results)

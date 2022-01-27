@@ -1,3 +1,4 @@
+from tkinter import RADIOBUTTON
 from torch._C import set_flush_denormal
 from torch.nn.modules import linear
 from dependency_parsers.data.processor import PAD_VALUE, unlabelled_padder
@@ -39,7 +40,7 @@ class Biaffine(nn.Module):
 
 class LitSemiSupervisedLSTM(pl.LightningModule):
     def __init__(self, embeddings, f_star, embedding_dim, hidden_dim, num_layers, 
-                lstm_dropout, linear_dropout, arc_dim, lab_dim, num_labels, lr, loss_arg, cle_arg, ge_only):
+                lstm_dropout, linear_dropout, arc_dim, lab_dim, num_labels, lr, loss_arg, cle_arg, ge_only, vocabulary, order):
         super().__init__()
 
         self.hidden_dim = hidden_dim
@@ -49,6 +50,8 @@ class LitSemiSupervisedLSTM(pl.LightningModule):
         self.cle = cle_arg
         self.prior = f_star
         self.ge_only = ge_only
+        self.vocabulary = vocabulary
+        self.order = order
 
         self.lstm = LSTM(
             input_size=embedding_dim, 
@@ -95,6 +98,40 @@ class LitSemiSupervisedLSTM(pl.LightningModule):
         optimizer = optim.Adam(self.parameters(), lr=self.lr)
         return optimizer
     
+    def assert_features(self, batch):
+        batch = batch['unlabelled']
+        oracle_edges = 0
+        total_edges = 0
+
+        for idx in range(len(batch)):
+            length = batch['lengths'][idx]
+            features = batch['features'][idx]
+            xpos = batch['xpos'][idx]
+            parents = batch['parents'][idx]
+            for i in range(length):
+                if i > 0:
+                    parent = parents[ i ]
+                    x1 = int(xpos[i])
+                    x2 = int(xpos[parent])
+                    if (x2, x1) in self.order:
+                        oracle_edges += 1
+                    total_edges += 1
+
+                for j in range(length):
+                    if torch.any(features[i][j] == 1.0):
+                        x1 = int(xpos[i])
+                        x2 = int(xpos[j])
+                        assert (x1, x2) in self.order
+                        
+                        ord = self.order[(x1, x2)]
+                        assert features[i][j][ord] == 1.0
+                        assert torch.all(features[i][j][:ord] == 0.0)
+                        assert torch.all(features[i][j][(ord+1):] == 0.0)
+                    else:
+                        assert torch.all(features[i][j] == 0.0)
+        
+        return (oracle_edges / total_edges)
+
     def forward(self, x):
         lengths = x['lengths']
 
@@ -131,6 +168,8 @@ class LitSemiSupervisedLSTM(pl.LightningModule):
         return arc_scores, lab_scores
         
     def training_step(self, batch, batch_idx):
+        edge_ratio = self.assert_features(batch)
+
         unlabelled = batch['unlabelled']
         labelled = batch['labelled']
 
@@ -161,7 +200,8 @@ class LitSemiSupervisedLSTM(pl.LightningModule):
 
         if self.ge_only:
             return {
-                'loss': unlabelled_loss
+                'loss': unlabelled_loss,
+                'edge_ratio': edge_ratio,
             }
 
         # COMPUTE LOSS FOR LABELLED DATA
@@ -203,8 +243,12 @@ class LitSemiSupervisedLSTM(pl.LightningModule):
         loss = 0.0
         labelled = 0.0
         unlabelled = 0.0
+
+        ratio = 0.0
         for output in outputs:
             loss += output['loss'] / len(outputs)
+            if self.ge_only:
+                ratio += output['edge_ratio']
 
             if not self.ge_only:
                 labelled += output['labelled_loss'] / len(outputs)
@@ -215,6 +259,7 @@ class LitSemiSupervisedLSTM(pl.LightningModule):
         if not self.ge_only:
             self.log('training_accuracy', correct/total, on_epoch=True, on_step=False, logger=True)
             print('\nAccuracy on labelled data: {:3.3f} | GE Loss: {:3.3f} | Labelled loss: {:3.3f}'.format(correct/total, unlabelled, labelled))
+        print('\nOracle target edges found: {:3.3f}% \n'.format(ratio / len(outputs)))
 
     def validation_step(self, val_batch, batch_idx):
         targets = val_batch['parents']
@@ -240,7 +285,7 @@ class LitSemiSupervisedLSTM(pl.LightningModule):
         arc_loss = self.arc_loss(arc_scores,targets)
         lab_loss = self.lab_loss(lab_scores, targets, labels)
 
-        total_loss = unlabelled_loss
+        total_loss = arc_loss + lab_loss
         num_correct = 0
         total = 0
         

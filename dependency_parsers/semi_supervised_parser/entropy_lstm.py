@@ -218,7 +218,7 @@ class LitEntropyLSTM(pl.LightningModule):
             
         if not self.ge_only:
             self.log('training_accuracy', correct/total, on_epoch=True, on_step=False, logger=True)
-            print('\nAccuracy on labelled data: {:3.3f} | GE Loss: {:3.3f} | Labelled loss: {:3.3f}'.format(correct/total, unlabelled, labelled))
+            print('\nAccuracy on labelled data: {:3.3f} | Unlabelled loss: {:3.3f} | Labelled loss: {:3.3f}'.format(correct/total, unlabelled, labelled))
 
     def validation_step(self, val_batch, batch_idx):
         targets = val_batch['parents']
