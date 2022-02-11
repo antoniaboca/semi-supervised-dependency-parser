@@ -3,50 +3,65 @@ import pyconll
 import pyconll.util
 import torch
 from torch.nn.utils.rnn import pack_padded_sequence, pad_sequence 
+from torch.nn import functional as F
+
 from torch.utils.data import Dataset
 
 from allennlp.data.vocabulary import Vocabulary
 
+PAD_VALUE = -100
+PAD_IDX = 0
+
 class SentenceDataset(Dataset):
-    def __init__(self, file, vocab=None, max_size=None, transform=None):
+    def __init__(self, file, ROOT_TOKEN, ROOT_TAG, ROOT_LABEL, vocab=None, transform=None, sentence_len=None):
         self.transform = transform
         
         words = {}
         pos_tags = {}
-        dep_rel = {}
+        adv_tags = {}
+        label = {}
+
+        words[ROOT_TOKEN] = 0
+        pos_tags[ROOT_TAG] = 0
+        adv_tags[ROOT_TAG] = 0
+        label[ROOT_LABEL] = 0
 
         data = pyconll.load_from_file(file)
-        
-        if max_size is None:
-            max_size = len(data)
 
         self.sentences = []
         self.parent_ids = []
         self.dep_indexes = []
-        self.deps_list = []
 
-        count = 0
         for sentence in data:
-            word_list = []
-            tag_list = []
-            parents = []
-            deps = []
+            if sentence_len is not None and len(sentence) > sentence_len:
+                continue
+            
+            word_list = [ROOT_TOKEN]
+            tag_list = [ROOT_TAG]
+            adv_list = [ROOT_TAG]
+            parents = [0]
+            labels = [ROOT_LABEL]
 
-            count += 1
-            if count > max_size:
-                break
+            words[ROOT_TOKEN] += 1
+            pos_tags[ROOT_TAG] += 1
+            adv_tags[ROOT_TAG] += 1
+            label[ROOT_LABEL] += 1
 
             for token in sentence:
-                if token.lemma is None:
-                    continue
-                if token.lemma in words:
-                    words[token.lemma] += 1
+                if token.id.isdigit():
+                    parents.append(int(token.head))
                 else:
-                    words[token.lemma] = 1
-                word_list.append(token.lemma)
-
-                if token.upos is None:
                     continue
+
+                if token.lemma is None or token.upos is None or token.deprel is None:
+                    continue
+
+                word = token.form.lower()
+                if word in words:
+                    words[word] += 1
+                else:
+                    words[word] = 1
+                word_list.append(word)
 
                 if token.upos in pos_tags:
                     pos_tags[token.upos] += 1
@@ -54,48 +69,66 @@ class SentenceDataset(Dataset):
                     pos_tags[token.upos] = 1
                 tag_list.append(token.upos)
 
-                if token.deprel is None:
-                    continue
-                if token.deprel in dep_rel:
-                    dep_rel[token.deprel] += 1
+                if token.xpos in adv_tags:
+                    adv_tags[token.xpos] += 1
                 else:
-                    dep_rel[token.deprel] = 1
+                    adv_tags[token.xpos] = 1
+                adv_list.append(token.xpos)
+
+                if token.deprel in label:
+                    label[token.deprel] += 1
+                else:
+                    label[token.deprel] = 1
                 
-                parents.append(token.head)
-                deps.append(token.deprel)
+                labels.append(token.deprel)
                 
             
-            self.sentences.append((word_list, tag_list))
+            self.sentences.append((word_list, tag_list, adv_list, parents, labels))
             self.parent_ids.append(parents)
-            self.deps_list.append(deps)
 
         if vocab is None:
-            self.vocabulary = Vocabulary(counter={'words': words, 'pos_tag': pos_tags, 'dep_rel': dep_rel})
+            self.vocabulary = Vocabulary(
+                counter={
+                    'words': words, 
+                    'pos_tag': pos_tags, 
+                    'adv_tag': adv_tags,
+                    'label': label
+                    }
+            )
+
         else:
             self.vocabulary = vocab
 
         self.index_to_word = self.vocabulary.get_index_to_token_vocabulary(namespace='words')
         self.index_to_pos = self.vocabulary.get_index_to_token_vocabulary(namespace='pos_tag')
-        self.index_to_dep = self.vocabulary.get_index_to_token_vocabulary(namespace='dep_rel')
+        self.index_to_xpos = self.vocabulary.get_index_to_token_vocabulary(namespace='adv_tag')
+        self.index_to_label = self.vocabulary.get_index_to_token_vocabulary(namespace='label')
 
         self.word_to_index = self.vocabulary.get_token_to_index_vocabulary(namespace='words')
         self.pos_to_index = self.vocabulary.get_token_to_index_vocabulary(namespace='pos_tag')
-        self.dep_to_index = self.vocabulary.get_token_to_index_vocabulary(namespace='dep_rel')
+        self.xpos_to_index = self.vocabulary.get_token_to_index_vocabulary(namespace='adv_tag')
+        self.label_to_index = self.vocabulary.get_token_to_index_vocabulary(namespace='label')
 
         self.index_set = []
         self.tag_set = []
+        self.xpos_set = []
+        self.parent_set = []
+        self.label_set = []
+        self.word_tag_set = []
 
-        for sentence, tags in self.sentences:
+        for sentence, tags, xpos, parents, labels in self.sentences:
             sidxs = [self.vocabulary.get_token_index(w, 'words') for w in sentence]
             tidxs = [self.vocabulary.get_token_index(t, 'pos_tag') for t in tags]
+            xidxs = [self.vocabulary.get_token_index(x, 'adv_tag') for x in xpos]
+            lidxs = [self.vocabulary.get_token_index(l, 'label') for l in labels]
 
             self.index_set.append(sidxs)
             self.tag_set.append(tidxs)
-        
-        for deps in self.deps_list:
-            didxs = [self.vocabulary.get_token_index(d, 'dep_rel') for d in deps]
+            self.xpos_set.append(xidxs)
+            self.parent_set.append(parents)
+            self.label_set.append(lidxs)
+            self.word_tag_set.append(xpos)
 
-            self.dep_indexes.append(didxs)
 
     def __len__(self):
         return len(self.index_set)
@@ -104,34 +137,61 @@ class SentenceDataset(Dataset):
         if torch.is_tensor(index):
             index = index.tolist()
 
-        sample = (self.index_set[index], self.tag_set[index])
+        sample = (
+            self.index_set[index], 
+            self.tag_set[index], 
+            self.xpos_set[index],
+            self.parent_set[index], 
+            self.label_set[index],
+            self.word_tag_set[index]
+        )
+
         if self.transform:
             sample = self.transform(sample)
         
+        try:
+            assert len(self.index_set[index]) == len(self.parent_set[index])
+        except AssertionError:
+            print(index)
+            print('Length {} for {}'.format(len(self.sentences[index][0]), self.sentences[index][0]))
+            print('Length {} for {}'.format(len(self.index_set[index]), self.index_set[index]))
+            print('Length {} for {}'.format(len(self.parent_set[index]), self.parent_set[index]))
+            print('Length {} for {}'.format(len(self.label_set[index]), self.label_set[index]))
+            raise AssertionError
+
         return sample
     
     def getVocabulary(self):
         return self.vocabulary
 
 class EmbeddingDataset(Dataset):
-    def __init__(self, filename, dim, words_to_index):
+    def __init__(self, filename, dim, words_to_index, ROOT_TOKEN):
         self.embeddings = {}
         self.dim = dim
+        self.embeddings[ROOT_TOKEN] = np.random.rand(dim) # dummy random embedding for the root token
 
         with open(filename) as file:
             for line in file:
                 tokens = line.split()
                 word = tokens[0]
                 embeds = []
+                
+                assert len(tokens) == dim + 1, "Dimension given does not match dimension in file"
+
                 for idx in range(1, dim + 1):
                     embeds.append(float(tokens[idx]))
                 
                 self.embeddings[word] = np.asarray(embeds)
 
-        indexed = np.zeros((len(words_to_index), self.dim), dtype=float)
-        for word, values in self.embeddings.items():
-            if word in words_to_index:
-                indexed[words_to_index[word]] = values
+        indexed = np.zeros((len(words_to_index), self.dim), dtype=np.float64)
+        
+        self.missing = []
+        for word, index in words_to_index.items():
+            if word in self.embeddings:
+                values = self.embeddings[word]
+                indexed[index] = values
+            else:
+                self.missing.append(word)
         
         self.idx_embeds = indexed
     
@@ -149,28 +209,79 @@ class Embed(object):
         self.embeddings = embeddings
     
     def __call__(self, sample):
-        sentence, tags = sample
+        sentence, tags, xpos, parents = sample
         embedded = [self.embeddings[idx] for idx in sentence]
 
-        return (sentence, embedded, tags)
+        return (sentence, embedded, tags, xpos, parents)
 
-def collate_fn_padder(samples):
+def labelled_padder(samples):
     # batch of samples to be expected to look like
-    # [(index_sent1, embed_sent1, tag_set1), ...]
+    # [(index_sent1, tag_set1, xpos_set1, parent_set1, label_set1, word_tag_set1), ...]
 
     #import ipdb; ipdb.set_trace()
-    indexes, embeds, tags = zip(*samples)
+    indexes, tags, xpos, parents, labels, word_tags = zip(*samples)
 
     sent_lens = torch.tensor([len(sent) for sent in indexes])
 
     indexes = [torch.tensor(sent) for sent in indexes]
-    embeds = [torch.tensor(embed) for embed in embeds]
     tags = [torch.tensor(tag) for tag in tags]
+    xpos = [torch.tensor(pos) for pos in xpos]
+    parents = [torch.tensor(parent) for parent in parents]
+    labels = [torch.tensor(label) for label in labels]
 
-    padded_sent = pad_sequence(indexes, batch_first=True)
-    padded_embeds = pad_sequence(embeds, batch_first=True)
-    padded_tags = pad_sequence(tags, batch_first=True)
+    padded_sent = pad_sequence(indexes, batch_first=True, padding_value=0)
+    padded_tags = pad_sequence(tags, batch_first=True, padding_value=0)
+    padded_xpos = pad_sequence(xpos, batch_first=True, padding_value=0)
+    padded_parents = pad_sequence(parents, batch_first=True, padding_value=-1)
+    padded_labels = pad_sequence(labels, batch_first=True, padding_value=0)
+    
+    padded_parents[:, 0] = -1
 
-    return {'sentence': padded_sent, 'embedding': padded_embeds, 'tags': padded_tags, 'lengths': sent_lens}
+    return {
+        'sentence': padded_sent, 
+        'tags': padded_tags,
+        'xpos': padded_xpos,
+        'parents': padded_parents, 
+        'lengths': sent_lens,
+        'labels': padded_labels,
+        'word_tags': word_tags,
+    }
 
+def unlabelled_padder(samples):
+    # batch of samples to be expected to look like
+    # [(idxs1, tags1, features1), ...]
 
+    indexes, tags, xpos, parents, labels, word_tags, features = zip(*samples)
+
+    sent_lens = torch.tensor([len(sent) for sent in indexes])
+
+    indexes = [torch.tensor(sent) for sent in indexes]
+    tags = [torch.tensor(tag) for tag in tags]
+    xpos = [torch.tensor(pos) for pos in xpos]
+
+    parents = [torch.tensor(parent) for parent in parents]
+    labels = [torch.tensor(label) for label in labels]
+
+    padded_sent = pad_sequence(indexes, batch_first=True, padding_value=0)
+    padded_tags = pad_sequence(tags, batch_first=True, padding_value=0)
+    padded_xpos = pad_sequence(xpos, batch_first=True, padding_value=0)
+
+    padded_parents = pad_sequence(parents, batch_first=True, padding_value=-1)
+    padded_labels = pad_sequence(labels, batch_first=True, padding_value=0)
+
+    maxlen = len(padded_sent[0])
+    padded_features = [F.pad(torch.tensor(feature), (0, 0, 0, maxlen - feature.shape[-2], 0, maxlen - feature.shape[-3])) for feature in features]
+    padded_features = torch.stack(padded_features)
+    
+    padded_parents[:, 0] = -1
+
+    return {
+        'sentence': padded_sent, 
+        'tags': padded_tags, 
+        'xpos': padded_xpos,
+        'parents': padded_parents,
+        'labels': padded_labels,
+        'features': padded_features,
+        'lengths': sent_lens,
+        'word_tags': word_tags,
+    }
