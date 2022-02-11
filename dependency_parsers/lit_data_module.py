@@ -1,6 +1,5 @@
 import pickle
 import numpy as np
-from pyrsistent import v
 from .data.processor import labelled_padder, unlabelled_padder
 from .data.oracle import order20, features20
 
@@ -79,6 +78,7 @@ class DataModule(pl.LightningDataModule):
         super().__init__()
 
         self.semi = args.semi
+        self.semi_labelled_batch = args.semi_labelled_batch
         self.TRAIN_SIZE = TRAIN_SIZE
         self.labelled_size = args.labelled_size
         self.VAL_SIZE = VAL_SIZE
@@ -104,6 +104,11 @@ class DataModule(pl.LightningDataModule):
 
             self.dev_set = list(filter(self.filter, object['dev']))[:self.VAL_SIZE]
             self.test_set = list(filter(self.filter, object['test']))[:self.TEST_SIZE]
+            import ipdb; ipdb.set_trace()
+            #self.dev_set = object['dev'][:self.VAL_SIZE]
+            #self.test_set = object['test'][:self.TEST_SIZE]
+
+    
             self.embeddings = object['embeddings']
             self.TAGSET_SIZE = object['TAGSET_SIZE']
             self.LABSET_SIZE = object['LABSET_SIZE']
@@ -153,7 +158,7 @@ class DataModule(pl.LightningDataModule):
         if not self.semi:
             return DataLoader(self.labelled_set, batch_size=self.BATCH_SIZE, shuffle=False, collate_fn=labelled_padder)
         
-        labelled = DataLoader(self.labelled_set, batch_size=self.labelled_size, shuffle=False, collate_fn=labelled_padder)
+        labelled = DataLoader(self.labelled_set, batch_size=self.semi_labelled_batch, shuffle=False, collate_fn=labelled_padder)
         unlabelled = DataLoader(self.unlabelled_set, batch_size=self.BATCH_SIZE, shuffle=False, collate_fn=unlabelled_padder)
 
         return {'labelled': labelled, 'unlabelled': unlabelled}

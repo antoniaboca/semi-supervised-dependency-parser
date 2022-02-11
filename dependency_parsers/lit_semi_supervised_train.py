@@ -25,6 +25,11 @@ def semisupervised_train(args):
     VAL_SIZE = args.validation
     TEST_SIZE = args.test
 
+    if args.labelled_loss_ratio is None:
+        labelled_ratio = args.semi_labelled_batch / (args.semi_labelled_batch + args.batch_size)
+    else:
+        labelled_ratio = args.labelled_loss_ratio
+
     module = DataModule(DATA_FILE, BATCH_SIZE, EMBEDDING_DIM, 
                         TRAIN_SIZE, VAL_SIZE, TEST_SIZE, args)
 
@@ -40,18 +45,18 @@ def semisupervised_train(args):
     transfer = LitSemiTransferLSTM(args, prior)
 
     model = LitSemiSupervisedLSTM(embeddings, prior, EMBEDDING_DIM, HIDDEN_DIM, NUM_LAYERS, LSTM_DROPOUT, LINEAR_DROPOUT,
-                    ARC_DIM, LAB_DIM, LABSET, LR, 'cross', args.cle, args.ge_only, vocab, order20)
+                    ARC_DIM, LAB_DIM, LABSET, LR, 'cross', args.cle, args.ge_only, vocab, order20, labelled_ratio)
     
     entropy = LitEntropyLSTM(embeddings, prior, EMBEDDING_DIM, HIDDEN_DIM, NUM_LAYERS, LSTM_DROPOUT, LINEAR_DROPOUT,
                     ARC_DIM, LAB_DIM, LABSET, LR, 'cross', args.cle, args.ge_only)
 
-    early_stop = pl.callbacks.EarlyStopping(monitor='validation_loss', min_delta=0.01, patience=5, mode='min')
+    early_stop = pl.callbacks.EarlyStopping(monitor='validation_loss', min_delta=0.01, patience=10, mode='min')
     
     logger = pl.loggers.TensorBoardLogger('semisupervised_logs/')
-    if args.model_name is not None:
-        logger = pl.loggers.TensorBoardLogger('semisupervised_size_logs/', sub_dir=args.model_name)
+    if args.name is not None:
+        logger = pl.loggers.TensorBoardLogger('evaluation_logs/', sub_dir=args.name)
         
-    trainer = pl.Trainer(max_epochs=NUM_EPOCH, logger=logger, log_every_n_steps=10, flush_logs_every_n_steps=50, callbacks=[early_stop])
+    trainer = pl.Trainer(max_epochs=NUM_EPOCH, logger=logger, log_every_n_steps=1, flush_logs_every_n_steps=1, callbacks=[early_stop])
     trainer.fit(model, module)
 
     print('TESTING...')

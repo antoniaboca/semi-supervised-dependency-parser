@@ -37,8 +37,8 @@ def biaffine_train(args):
     early_stop = pl.callbacks.EarlyStopping(monitor='validation_loss', min_delta=0.01, patience=5, mode='min')
     
     logger = pl.loggers.TensorBoardLogger('my_logs/')
-    if args.model_name is not None:
-        logger = pl.loggers.TensorBoardLogger('train_size_logs/', sub_dir=args.model_name)
+    if args.name is not None:
+        logger = pl.loggers.TensorBoardLogger('evaluation_logs/', sub_dir=args.name)
         
     trainer = pl.Trainer(max_epochs=NUM_EPOCH, logger=logger, log_every_n_steps=10, flush_logs_every_n_steps=50,callbacks=[early_stop])
     trainer.fit(model, module)
@@ -52,5 +52,5 @@ def size_loop(args):
     for size in sizes:
         args.train = size
         args.file = 'train' + str(size) + '.pickle'
-        args.model_name = 'train_chuliu_edmonds_' + str(size)
+        args.model_name = 'supervised_evaluation_' + str(size)
         biaffine_train(args)

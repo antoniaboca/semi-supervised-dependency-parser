@@ -4,8 +4,8 @@ import copy
 
 from collections import deque
 from .processor import SentenceDataset, EmbeddingDataset, Embed
-from .params import OBJECT_FILE
-from .params import ROOT_TOKEN, ROOT_LABEL, ROOT_TAG
+# from .params import OBJECT_FILE
+from .params import OBJECT_FILE, ROOT_TOKEN, ROOT_LABEL, ROOT_TAG
 
 def file_load(args):
     TRAIN_FILE = args.train_data
@@ -14,6 +14,8 @@ def file_load(args):
     EMBEDDING_FILE = args.embeddings
     EMBEDDING_DIM = args.embedding_dim
     SENTENCE_SIZE = args.limit_sentence_size
+    OBJECT_FILE = args.save_to_pickle_file
+
     if SENTENCE_SIZE == 0:
         SENTENCE_SIZE = None
     
@@ -47,7 +49,8 @@ def file_load(args):
 
 def file_save(args):
     train_set, test_set, dev_set, embeddings, vocab, tag_size, label_size = file_load(args)
-
+    OBJECT_FILE = args.save_to_pickle_file
+    
     print('Save the curated set to a file using pickle...')
     with open(OBJECT_FILE, 'wb') as file:
         pickle.dump({
