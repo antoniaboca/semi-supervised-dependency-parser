@@ -82,7 +82,6 @@ class SentenceDataset(Dataset):
                 
                 labels.append(token.deprel)
                 
-            
             self.sentences.append((word_list, tag_list, adv_list, parents, labels))
             self.parent_ids.append(parents)
 
