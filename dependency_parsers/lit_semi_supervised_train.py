@@ -57,10 +57,10 @@ def semisupervised_train(args):
         logger = pl.loggers.TensorBoardLogger('evaluation_logs/', sub_dir=args.name)
         
     trainer = pl.Trainer(max_epochs=NUM_EPOCH, logger=logger, log_every_n_steps=1, flush_logs_every_n_steps=1, callbacks=[early_stop])
-    trainer.fit(model, module)
+    trainer.fit(entropy, module)
 
     print('TESTING...')
-    results = trainer.test(model, module, verbose=True)
+    results = trainer.test(entropy, module, verbose=True)
     print(results)
 
 def size_loop(args):
