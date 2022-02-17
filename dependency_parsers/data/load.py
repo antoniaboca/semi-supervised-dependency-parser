@@ -82,6 +82,14 @@ def bucket_save(train_buckets, loaded, file_name, size):
     sample = rand.sample(ranges, size)
     rand_set = [train_buckets[idx].pop() for idx in sample]
 
+    remainder = []
+    for bucket in train_buckets.keys():
+        while train_buckets[bucket]:
+            remainder.append(train_buckets[bucket].pop())
+
+    # unlabelled_set = [(s, t) for s, t, _, _ in remainder] # get rid of parent and label
+    rand.shuffle(remainder)
+
     print(f'Saving sample of size {size} to {file_name}...')
     with open(file_name, 'wb') as file:
         pickle.dump({'train_labelled': rand_set, 
@@ -90,7 +98,8 @@ def bucket_save(train_buckets, loaded, file_name, size):
             'embeddings': embeddings, 
             'vocabulary': vocab,
             'TAGSET_SIZE': tag_size, 
-            'LABSET_SIZE': label_size
+            'LABSET_SIZE': label_size,
+            'remainder': remainder,
             }, file)
     print('Saved.')
 

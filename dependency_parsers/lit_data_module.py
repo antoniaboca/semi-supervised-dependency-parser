@@ -77,6 +77,7 @@ class DataModule(pl.LightningDataModule):
                 TRAIN_SIZE, VAL_SIZE, TEST_SIZE, args):
         super().__init__()
 
+        self.transfer = args.transfer
         self.semi = args.semi
         self.semi_labelled_batch = args.semi_labelled_batch
         self.TRAIN_SIZE = TRAIN_SIZE
@@ -96,11 +97,16 @@ class DataModule(pl.LightningDataModule):
     def prepare_data(self):
         with open(self.PICKLE_FILE, 'rb') as file:
             object = pickle.load(file)
-            if self.semi:
-                self.unlabelled_set = list(filter(self.filter, object['train_unlabelled']))[:self.TRAIN_SIZE]
-                self.labelled_set = object['train_labelled'][:self.labelled_size]
+            if self.transfer:
+                total = list(filter(self.filter, object['remainder']))
+                self.labelled_set = total[:self.labelled_size]
+                self.unlabelled_set = total[self.labelled_size : self.labelled_size + self.TRAIN_SIZE]
             else:
-                self.labelled_set = list(filter(self.filter, object['train_labelled']))[:self.TRAIN_SIZE]
+                if self.semi:
+                    self.unlabelled_set = list(filter(self.filter, object['train_unlabelled']))[:self.TRAIN_SIZE]
+                    self.labelled_set = object['train_labelled'][:self.labelled_size]
+                else:
+                    self.labelled_set = list(filter(self.filter, object['train_labelled']))[:self.TRAIN_SIZE]
 
             self.dev_set = list(filter(self.filter, object['dev']))[:self.VAL_SIZE]
             self.test_set = list(filter(self.filter, object['test']))[:self.TEST_SIZE]

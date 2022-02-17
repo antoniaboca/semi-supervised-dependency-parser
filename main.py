@@ -21,6 +21,7 @@ def main():
     model.add_argument('--file', type=str, default='dependency_parsers/data/cache.pickle', help='File containing formatted input data')
     model.add_argument('--cle', action='store_true', help='Use the chuliu-edmonds algorithm to create trees for testing phase')
     model.add_argument('--semi', action='store_true', help='Use the semi-supervised dependency parser')
+    model.add_argument('--transfer', action='store_true', help='Use the weights of a supervised parser')
     model.add_argument('--labelled-size', type=int, default=20000, help='Number of labelled sentences in the semi-supervised context')
     model.add_argument('--semi-labelled-batch', type=int, default=8, help='Number of labelled sentences in a batch for the semi supervised context')
     model.add_argument('--ge-only', action='store_true', help='Use only unlabelled data to train the semi-supervised parser')

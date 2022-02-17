@@ -9,6 +9,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
 
+from dependency_parsers.biaffine_parser.biaffine_lstm import LitLSTM
 
 from torch.nn.utils.rnn import pad_sequence, pad_packed_sequence, pack_padded_sequence
 from torch.nn import Linear, LSTM
@@ -37,24 +38,39 @@ class Biaffine(nn.Module):
         nn.init.xavier_uniform_(self.W)
 
 class LitEntropyLSTM(pl.LightningModule):
-    def __init__(self, embeddings, f_star, embedding_dim, hidden_dim, num_layers, 
-                lstm_dropout, linear_dropout, arc_dim, lab_dim, num_labels, lr, loss_arg, cle_arg, ge_only):
+    def __init__(self, embeddings, f_star, args, loss):
         super().__init__()
 
-        self.hidden_dim = hidden_dim
-        self.arc_dim = arc_dim
-        self.lab_dim = lab_dim
-        self.lr = lr
-        self.cle = cle_arg
-        self.prior = f_star
-        self.ge_only = ge_only
+        if loss == 'cross':
+            self.loss = nn.CrossEntropyLoss(ignore_index=-1)
+        elif loss == 'mtt':
+            self.loss = self.loss_function
+
+        self.transfer = args.transfer
         self.log_softmax = nn.LogSoftmax(dim=-1)
+        self.ge_only = args.ge_only
+
+        if args.transfer is True:
+            self.lr = args.lr
+            self.cle = args.cle
+            self.prior = f_star
+            self.model = LitLSTM.load_from_checkpoint('my_logs/default/version_73/checkpoints/epoch=15-step=1007.ckpt', 
+                            hparams_file='my_logs/default/version_73/hparams.yaml')
+            return    
+    
+        self.hidden_dim = args.hidden_dim
+        self.arc_dim = args.arc_dim
+        self.lab_dim = args.lab_dim
+        self.lr = args.lr
+        self.cle = args.cle_arg
+        self.prior = f_star
+        
 
         self.lstm = LSTM(
-            input_size=embedding_dim, 
-            hidden_size=hidden_dim,
-            num_layers=num_layers,
-            dropout=lstm_dropout,
+            input_size=args.embedding_dim, 
+            hidden_size=args.hidden_dim,
+            num_layers=args.num_layers,
+            dropout=args.lstm_dropout,
             bidirectional=True
         )
 
@@ -62,40 +78,36 @@ class LitEntropyLSTM(pl.LightningModule):
                                                             padding_idx=0)
 
         # dropout layer
-        self.dropout = nn.Dropout(linear_dropout)
+        self.dropout = nn.Dropout(args.linear_dropout)
 
         # arc linear layer
-        self.arc_linear_h = Linear(hidden_dim * 2, arc_dim)  # this is your g
-        self.arc_linear_d = Linear(hidden_dim * 2, arc_dim) # this is your f
+        self.arc_linear_h = Linear(self.hidden_dim * 2, self.arc_dim)  # this is your g
+        self.arc_linear_d = Linear(self.hidden_dim * 2, self.arc_dim) # this is your f
 
         #label linear layer 
-        self.lab_linear_h = Linear(hidden_dim * 2, lab_dim)
-        self.lab_linear_d = Linear(hidden_dim * 2, lab_dim)
+        self.lab_linear_h = Linear(self.hidden_dim * 2, self.lab_dim)
+        self.lab_linear_d = Linear(self.hidden_dim * 2, self.lab_dim)
 
         #arc scores
-        self.arc_score_h = Linear(arc_dim, 1)
-        self.arc_score_d = Linear(arc_dim, 1)
+        self.arc_score_h = Linear(self.arc_dim, 1)
+        self.arc_score_d = Linear(self.arc_dim, 1)
 
         #lab scores
-        self.lab_score_h = Linear(lab_dim, num_labels)
-        self.lab_score_d = Linear(lab_dim, num_labels)
+        self.lab_score_h = Linear(self.lab_dim, args.num_labels)
+        self.lab_score_d = Linear(self.lab_dim, args.num_labels)
 
         # biaffine layers
-        self.arc_biaffine = Biaffine(arc_dim, 1)
-        self.lab_biaffine = Biaffine(lab_dim, num_labels)
+        self.arc_biaffine = Biaffine(self.arc_dim, 1)
+        self.lab_biaffine = Biaffine(self.lab_dim, args.num_labels)
 
-        if loss_arg == 'cross':
-            self.loss = nn.CrossEntropyLoss(ignore_index=-1)
-        elif loss_arg == 'mtt':
-            self.loss = self.loss_function
-
-        self.log_loss = []
-    
     def configure_optimizers(self):
         optimizer = optim.Adam(self.parameters(), lr=self.lr)
         return optimizer
     
     def forward(self, x):
+        if self.transfer:
+            return self.model(x)
+
         lengths = x['lengths']
 
         embedding = self.word_embedding(x['sentence'])
@@ -147,7 +159,8 @@ class LitEntropyLSTM(pl.LightningModule):
         try:
             assert torch.all(log_potentials <= 0)
         except AssertionError:
-            import ipdb; ipdb.post_mortem()
+            #import ipdb; ipdb.post_mortem()
+            pass
 
         dist = NonProjectiveDependencyCRF(log_potentials, lengths - torch.ones(len(lengths)))
 
@@ -224,7 +237,59 @@ class LitEntropyLSTM(pl.LightningModule):
         targets = val_batch['parents']
         labels = val_batch['labels']
         
-        batch, maxlen = targets.shape
+        arc_scores, lab_scores = self(val_batch)
+        batch_unlabelled, maxlen_unlabelled, _ = arc_scores.shape
+        lengths = val_batch['lengths']
+        
+        potentials = self.score_to_diagonal(arc_scores)
+        log_potentials = self.apply_log_softmax(potentials, lengths)
+
+        try:
+            assert torch.all(log_potentials <= 0)
+        except AssertionError:
+            #import ipdb; ipdb.post_mortem()
+            pass
+        
+        dist = NonProjectiveDependencyCRF(log_potentials, lengths - torch.ones(len(lengths)))
+
+        assert not torch.isnan(dist.partition).any()
+        assert not torch.isinf(dist.partition).any()
+        assert not torch.isinf(dist.marginals).any()
+        assert not torch.isnan(dist.marginals).any()
+
+        #Z = dist.partition
+        #total_loss = self.partition_loss(torch.clone(potentials), torch.clone(parents), lengths, Z)
+        #diag_features = self.feature_to_diagonal(features.float())
+        unlabelled_loss = self.entropy_loss(dist.marginals, torch.clone(-log_potentials))
+
+        self.log('unlabelled_loss', unlabelled_loss.detach(), on_step=True, on_epoch=True, logger=True)
+
+        if self.ge_only:
+            return {
+                'loss': unlabelled_loss
+            }
+
+        # COMPUTE LOSS FOR LABELLED DATA
+        l_arc_scores, l_lab_scores = self(val_batch)
+        batch_labelled, maxlen_labelled, _ = l_arc_scores.shape
+        lengths = val_batch['lengths']
+        parents = val_batch['parents']
+
+        labelled_loss = self.arc_loss(l_arc_scores, parents)
+        # lab_loss = self.lab_loss(lab_scores, parents, labels)
+
+        batch_total = batch_labelled + batch_unlabelled
+        total_loss = (batch_labelled / batch_total) * labelled_loss + (batch_unlabelled / batch_total) * unlabelled_loss
+
+        targets = torch.argmax(l_arc_scores, dim=2)
+
+        num_correct = 0
+        total = 0
+
+        num_correct += torch.count_nonzero((targets == parents) * (parents != -1))
+        total += torch.count_nonzero((parents == parents) * (parents != -1))
+        
+        """
         arc_scores, lab_scores = self(val_batch)
 
         arc_loss = self.arc_loss(arc_scores,targets)
@@ -241,8 +306,8 @@ class LitEntropyLSTM(pl.LightningModule):
         self.log('validation_loss', total_loss.detach(), on_step=False, on_epoch=True, logger=True)
         self.log('validation_arc_loss', arc_loss.detach(), on_step=False, on_epoch=True, logger=True)
         self.log('validation_lab_loss', lab_loss.detach(), on_step=False, on_epoch=True, logger=True)
-
-        return {'loss': total_loss, 'correct': num_correct, 'total': total, 'arc_loss':arc_loss.detach(), 'lab_loss': lab_loss.detach()}
+        """
+        return {'loss': total_loss, 'correct': num_correct, 'total': total, 'labelled_loss':labelled_loss.detach(), 'unlabelled_loss': unlabelled_loss.detach()}
 
     def validation_epoch_end(self, preds):
         correct = 0
@@ -250,16 +315,21 @@ class LitEntropyLSTM(pl.LightningModule):
         loss = 0
         arc_loss = 0.0
         lab_loss = 0.0
+        labelled_loss = 0.0
+        unlabelled_loss = 0.0
         for pred in preds:
             correct += pred['correct']
             total += pred['total']
             loss += pred['loss']
-            arc_loss += pred['arc_loss'] / len(preds)
-            lab_loss += pred['lab_loss'] / len(preds)
+            labelled_loss += pred['labelled_loss']
+            unlabelled_loss += pred['unlabelled_loss']
+            # arc_loss += pred['arc_loss'] / len(preds)
+            # lab_loss += pred['lab_loss'] / len(preds)
 
+        self.log('validation_loss', loss.detach(), on_step=False, on_epoch=True, logger=True)
         self.log("validation_accuracy",correct/total, on_epoch=True, logger=True)
 
-        print('\nAccuracy on validation set: {:3.3f} | Loss : {:3.3f} | Arc loss: {:3.3f} | Lab loss: {:3.3f}'.format(correct/total, loss/len(preds), arc_loss.detach(), lab_loss.detach()))
+        print('\nAccuracy on validation set: {:3.3f} | Loss : {:3.3f} | Labelled loss: {:3.3f} | Unlabelled loss: {:3.3f}'.format(correct/total, loss/len(preds), labelled_loss.detach()/len(preds), unlabelled_loss.detach()/len(preds)))
         return {'accuracy': correct / total, 'loss': loss/len(preds)}
 
     def test_step(self, test_batch, batch_idx):

@@ -47,8 +47,7 @@ def semisupervised_train(args):
     model = LitSemiSupervisedLSTM(embeddings, prior, EMBEDDING_DIM, HIDDEN_DIM, NUM_LAYERS, LSTM_DROPOUT, LINEAR_DROPOUT,
                     ARC_DIM, LAB_DIM, LABSET, LR, 'cross', args.cle, args.ge_only, vocab, order20, labelled_ratio)
     
-    entropy = LitEntropyLSTM(embeddings, prior, EMBEDDING_DIM, HIDDEN_DIM, NUM_LAYERS, LSTM_DROPOUT, LINEAR_DROPOUT,
-                    ARC_DIM, LAB_DIM, LABSET, LR, 'cross', args.cle, args.ge_only)
+    entropy = LitEntropyLSTM(embeddings, prior, args, 'cross')
 
     early_stop = pl.callbacks.EarlyStopping(monitor='validation_loss', min_delta=0.01, patience=10, mode='min')
     
