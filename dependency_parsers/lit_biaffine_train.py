@@ -5,6 +5,7 @@ import pytorch_lightning as pl
 
 def biaffine_train(args):
 
+    args.entropy = False
     BATCH_SIZE = args.batch_size
     EMBEDDING_DIM = args.embedding_dim
     HIDDEN_DIM = args.hidden_dim
@@ -27,6 +28,7 @@ def biaffine_train(args):
     module.setup(stage='fit')
     TAGSET = module.TAGSET_SIZE
     LABSET = module.LABSET_SIZE
+    args.num_labels = LABSET
     embeddings = module.embeddings
     
     model = LitSupervisedLSTM(embeddings, args)

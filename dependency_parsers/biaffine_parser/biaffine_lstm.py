@@ -21,7 +21,9 @@ class LitSupervisedLSTM(pl.LightningModule):
         super().__init__()
 
         self.save_hyperparameters()
-
+        self.lr = args.lr 
+        self.cle = args.cle
+        
         self.model = BiaffineLSTM(embeddings, args)
 
         self.arc_loss = arc_loss

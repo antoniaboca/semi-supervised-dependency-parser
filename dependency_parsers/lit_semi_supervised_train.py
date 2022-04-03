@@ -7,7 +7,6 @@ from .semi_supervised_parser.semi_supervised_lstm import LitSemiSupervisedLSTM
 import pytorch_lightning as pl
 
 def semisupervised_train(args):
-    args.entropy = True
     BATCH_SIZE = args.batch_size
     EMBEDDING_DIM = args.embedding_dim
     HIDDEN_DIM = args.hidden_dim
@@ -42,10 +41,12 @@ def semisupervised_train(args):
     prior = module.get_prior()
     order20 = module.order20
     vocab = module.vocabulary
-    # transfer = LitSemiTransferLSTM(args, prior)
 
-    model = LitSemiSupervisedLSTM(embeddings, prior, vocab, order20, args)
-    entropy = LitEntropyLSTM(embeddings, args)
+
+    if args.model == 'ge':
+        model = LitSemiSupervisedLSTM(embeddings, prior, vocab, order20, args)
+    else:
+        model = LitEntropyLSTM(embeddings, args)
 
     early_stop = pl.callbacks.EarlyStopping(monitor='validation_loss', min_delta=0.01, patience=10, mode='min')
     
@@ -54,10 +55,10 @@ def semisupervised_train(args):
         logger = pl.loggers.TensorBoardLogger('logs/evaluation_logs/', sub_dir=args.name)
         
     trainer = pl.Trainer(max_epochs=NUM_EPOCH, logger=logger, log_every_n_steps=1, flush_logs_every_n_steps=1, callbacks=[early_stop])
-    trainer.fit(entropy, module)
+    trainer.fit(model, module)
 
     print('TESTING...')
-    results = trainer.test(entropy, module, verbose=True)
+    results = trainer.test(model, module, verbose=True)
     print(results)
 
 def size_loop_semi_supervised(args):

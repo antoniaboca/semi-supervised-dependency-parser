@@ -41,7 +41,7 @@ class DataModule(pl.LightningDataModule):
         super().__init__()
 
         self.transfer = args.transfer
-        self.entropy = args.entropy
+        self.model = args.model
         self.semi = args.semi
         self.semi_labelled_batch = args.semi_labelled_batch
         self.TRAIN_SIZE = TRAIN_SIZE
@@ -54,7 +54,8 @@ class DataModule(pl.LightningDataModule):
         self.oracle = args.oracle
         self.ge_only = args.ge_only
         self.tag_type = args.tag_type
-        
+        self.limit_sentence_size = args.limit_sentence_size
+
         if args.limit_sentence_size > 0:
             self.filter = lambda x: len(x[0]) < args.limit_sentence_size
         else:
@@ -68,21 +69,19 @@ class DataModule(pl.LightningDataModule):
                 self.labelled_set = total[:self.labelled_size]
                 self.unlabelled_set = total[self.labelled_size : self.labelled_size + self.TRAIN_SIZE]
             else:
-                if self.entropy:
-                    self.unlabelled_set = list(filter(self.filter, object['remainder']))[:self.TRAIN_SIZE]
-                    self.labelled_set = object['train_labelled'][:self.labelled_size]
-                elif self.semi:
-                    self.unlabelled_set = list(filter(self.filter, object['train_unlabelled']))[:self.TRAIN_SIZE]
-                    self.labelled_set = object['train_labelled'][:self.labelled_size]
+                if self.semi:
+                    if self.limit_sentence_size > 0:
+                        self.unlabelled_set = list(filter(self.filter, object['remainder']))[:self.TRAIN_SIZE]
+                        self.labelled_set = object['train_labelled'][:self.labelled_size]
+                    else:
+                        self.unlabelled_set = list(filter(self.filter, object['train_unlabelled']))[:self.TRAIN_SIZE]
+                        self.labelled_set = object['train_labelled'][:self.labelled_size]
                 else:
                     self.labelled_set = list(filter(self.filter, object['train_labelled']))[:self.TRAIN_SIZE]
 
             self.dev_set = list(filter(self.filter, object['dev']))[:self.VAL_SIZE]
             self.test_set = list(filter(self.filter, object['test']))[:self.TEST_SIZE]
-            
-            #self.dev_set = object['dev'][:self.VAL_SIZE]
-            #self.test_set = object['test'][:self.TEST_SIZE]
-    
+        
             self.embeddings = object['embeddings']
             self.TAGSET_SIZE = object['TAGSET_SIZE']
             self.LABSET_SIZE = object['LABSET_SIZE']
@@ -111,33 +110,10 @@ class DataModule(pl.LightningDataModule):
                         idx_key = (self.vocabulary.get_token_index(key[0], namespace=namespc), self.vocabulary.get_token_index(key[1], namespace=namespc))
                         self.features20[idx_key] = value
                         self.order20[idx_key] = order20[key]
-                    
-                oracle = 0
-                totals = 0
-                for _, upos, xpos, parents, _, word_tags in self.unlabelled_set:
-                    for idx in range(1, len(parents)):
-                        xhead = xpos[parents[idx]]
-                        xdep = xpos[idx]
 
-                        uhead = upos[parents[idx]]
-                        udep = upos[idx]
-
-                        try:
-                            assert xpos[idx] == self.vocabulary.get_token_index(word_tags[idx], namespace='adv_tag')
-                            assert self.vocabulary.get_token_from_index(xpos[idx], namespace='adv_tag') == word_tags[idx]
-                        except:
-                            import ipdb; ipdb.post_mortem()
-
-                        if namespc == 'xpos':
-                            head, dep = xhead, xdep
-                        else:
-                            head, dep = uhead, udep
-
-                        if (head,dep) in self.features20:
-                            oracle += 1
-                        totals += 1
-                print('\n Percentage of target edges that are oracle edges: {:3.3f}\n'.format(oracle/totals))
-                    
+                ((g_count, g_total), (t_count, t_total)) = counter.compare_to_prior(self.features20)
+                print('\n Percentage of target edges that are oracle edges: {:3.3f}\n'.format(t_count/t_total))
+                
                 feature_set = feature_vector(self.order20, self.unlabelled_set, self.tag_type) # this is the training set for the semi-supervised context
                 self.unlabelled_set = [(*a,b) for a, b in zip(self.unlabelled_set, feature_set)]
 

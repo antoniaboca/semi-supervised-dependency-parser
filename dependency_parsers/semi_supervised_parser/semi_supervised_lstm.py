@@ -23,7 +23,8 @@ class LitSemiSupervisedLSTM(pl.LightningModule):
         super().__init__()
         self.save_hyperparameters()
 
-        self.cle = args.cle_arg
+        self.lr = args.lr
+        self.cle = args.cle
         self.prior = f_star
         self.ge_only = args.ge_only
         self.vocabulary = vocabulary
@@ -78,7 +79,7 @@ class LitSemiSupervisedLSTM(pl.LightningModule):
         
     def training_step(self, batch, batch_idx):
         edge_ratio = self.assert_features(batch)
-
+        
         unlabelled = batch['unlabelled']
         features = unlabelled['features']
 
@@ -133,6 +134,7 @@ class LitSemiSupervisedLSTM(pl.LightningModule):
                 'total': total, 
                 'labelled_loss': labelled_loss.detach(),
                 'unlabelled_loss': unlabelled_loss.detach(),
+                'edge_ratio': edge_ratio
         }
         
     def training_epoch_end(self, outputs):
@@ -145,9 +147,8 @@ class LitSemiSupervisedLSTM(pl.LightningModule):
         ratio = 0.0
         for output in outputs:
             loss += output['loss'] / len(outputs)
-            if self.ge_only:
-                ratio += output['edge_ratio']
-
+            ratio += output['edge_ratio']
+            
             if not self.ge_only:
                 labelled += output['labelled_loss'] / len(outputs)
                 unlabelled += output['unlabelled_loss'] / len(outputs)

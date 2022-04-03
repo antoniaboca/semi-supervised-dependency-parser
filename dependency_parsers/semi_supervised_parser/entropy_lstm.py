@@ -22,11 +22,13 @@ class LitEntropyLSTM(pl.LightningModule):
     def __init__(self, embeddings, args):
         super().__init__()
 
+        self.lr = args.lr
         self.loss = nn.CrossEntropyLoss(ignore_index=-1)
 
         self.transfer = args.transfer
         self.log_softmax = nn.LogSoftmax(dim=-1)
         self.ge_only = args.ge_only
+        self.cle = args.cle
 
         if args.transfer is True:
             self.lr = args.lr
@@ -256,9 +258,9 @@ class LitEntropyLSTM(pl.LightningModule):
         total += torch.count_nonzero((targets == targets)* (targets != -1))
 
         self.log('test_loss', total_loss.detach(), on_step=False, on_epoch=True, logger=True)
-        self.log('test_arc_loss', arc_loss.detach(), on_step=False, on_epoch=True, logger=True)
+        self.log('test_labelled_loss', labelled_loss.detach(), on_step=False, on_epoch=True, logger=True)
 
-        return {'loss': total_loss, 'correct': num_correct, 'total': total, 'arc_loss':arc_loss.detach()}
+        return {'loss': total_loss, 'correct': num_correct, 'total': total, 'arc_loss':labelled_loss.detach()}
 
     
     def test_epoch_end(self, preds):

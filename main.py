@@ -31,6 +31,7 @@ def main():
     model.add_argument('--name', type=str, default=None)
     model.add_argument('--labelled-loss-ratio', type=float, default=None)
     model.add_argument('--tag-type', type=str, choices=['xpos', 'upos'], default='xpos')
+    model.add_argument('--model', type=str, choices=['ge', 'entropy'], default='ge')
     
     data = parser.add_argument_group('Dataset size')
     data.add_argument('--train', type=int, default=20000, help='Max amount of sentences to load for training')
