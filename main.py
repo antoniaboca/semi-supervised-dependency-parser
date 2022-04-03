@@ -1,12 +1,14 @@
 import argparse
 from dependency_parsers.lit_biaffine_train import biaffine_train, size_loop
-from dependency_parsers.lit_semi_supervised_train import semisupervised_train
+from dependency_parsers.lit_semi_supervised_train import semisupervised_train, size_loop_semi_supervised
 from dependency_parsers.data.load import file_save, bucket_loop, bucket_unlabelled_loop
+
+from dependency_parsers.analysis.counter import TagCounter
 
 def main():
     parser = argparse.ArgumentParser(description = "Supervised biaffine dependency parser")
 
-    parser.add_argument('mode', type=str, choices=['load', 'train', 'loop', 'labelled_bucket', 'unlabelled_bucket'])
+    parser.add_argument('mode', type=str, choices=['load', 'train', 'loop', 'labelled_bucket', 'unlabelled_bucket', 'analysis'])
 
     model = parser.add_argument_group('Model parameters')
     model.add_argument('--batch-size', type=int, default=32)
@@ -28,6 +30,7 @@ def main():
     model.add_argument('--oracle', action='store_true', help='Use oracle prior distribution for semi-supervised context')
     model.add_argument('--name', type=str, default=None)
     model.add_argument('--labelled-loss-ratio', type=float, default=None)
+    model.add_argument('--tag-type', type=str, choices=['xpos', 'upos'], default='xpos')
     
     data = parser.add_argument_group('Dataset size')
     data.add_argument('--train', type=int, default=20000, help='Max amount of sentences to load for training')
@@ -37,11 +40,21 @@ def main():
     data.add_argument('--save-to-pickle-file', type=str, default='dependency_parsers/data/cache.pickle', help='File where to save formatted input data')
 
     loader = parser.add_argument_group('Data loading arguments')
-    loader.add_argument('--train-data', type=str, default='./en_ewt-ud-train.conllu')
-    loader.add_argument('--validation-data', type=str, default='./en_ewt-ud-dev.conllu')
-    loader.add_argument('--testing-data', type=str, default='./en_ewt-ud-test.conllu')
-    loader.add_argument('--embeddings', type=str, default='./glove.6B.100d.txt')
+    loader.add_argument('--train-data', type=str, default='./conllu/en_ewt-ud-train.conllu')
+    loader.add_argument('--validation-data', type=str, default='./conllu/en_ewt-ud-dev.conllu')
+    loader.add_argument('--testing-data', type=str, default='./conllu/en_ewt-ud-test.conllu')
+    loader.add_argument('--embeddings', type=str, default='./embeddings/glove.6B.100d.txt')
     loader.add_argument('--limit-sentence-size', type=int, default=0, help='Filter sentences based on how many tokens they have.')
+
+    analysis = parser.add_argument_group('Analysis arguments')
+    analysis.add_argument_group('Function to run')
+    analysis.add_argument('--all-coverage', action='store_true', help='Determine all levels of coverage')
+    analysis.add_argument('--set-coverage', type=float, default=None, help='Return number of tags necessary for given coverage')
+    analysis.add_argument('--get-top-edges', type=int, default=None, help='Get the top number of POS tag edges.')
+    
+    analysis.add_argument('--min-occurence', type=int, default=100)
+    analysis.add_argument('--sentence-length', type=int, default=None)
+    analysis.add_argument('--step', type=int, default=5)
 
     args = parser.parse_args()
     args.model_name = None
@@ -60,7 +73,24 @@ def main():
             semisupervised_train(args)
             
     if args.mode == 'loop':
-        size_loop(args)
+        size_loop_semi_supervised(args)
+    
+    if args.mode == 'analysis':
+        file, min_occurence, f, tag_type, sentence_length, step = args.file, args.min_occurence, args.set_coverage, args.tag_type, args.sentence_length, args.step
+        top = args.get_top_edges
+
+        if args.all_coverage is True:
+            stats = TagCounter.get_statistics_from_file(file, min_occurence, tag_type, sentence_length, step)
+            print(stats)
+            
+        if args.set_coverage is not None:
+            no = TagCounter.tag_search_from_file(file, f, min_occurence, tag_type, sentence_length, step)
+            print(no)
+
+        if args.get_top_edges is not None:
+            tops = TagCounter.get_top_edges_from_file(file, top, min_occurence, tag_type, sentence_length)
+            print(tops)
+
 
 if __name__ == '__main__':
     main()

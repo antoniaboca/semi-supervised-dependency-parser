@@ -9,7 +9,7 @@ import torch
 import pytorch_lightning as pl
 
 def semisupervised_train(args):
-
+    args.entropy = True
     BATCH_SIZE = args.batch_size
     EMBEDDING_DIM = args.embedding_dim
     HIDDEN_DIM = args.hidden_dim
@@ -42,12 +42,12 @@ def semisupervised_train(args):
     prior = module.get_prior()
     order20 = module.order20
     vocab = module.vocabulary
-    transfer = LitSemiTransferLSTM(args, prior)
+    # transfer = LitSemiTransferLSTM(args, prior)
 
-    model = LitSemiSupervisedLSTM(embeddings, prior, EMBEDDING_DIM, HIDDEN_DIM, NUM_LAYERS, LSTM_DROPOUT, LINEAR_DROPOUT,
-                    ARC_DIM, LAB_DIM, LABSET, LR, 'cross', args.cle, args.ge_only, vocab, order20, labelled_ratio)
+    #model = LitSemiSupervisedLSTM(embeddings, prior, EMBEDDING_DIM, HIDDEN_DIM, NUM_LAYERS, LSTM_DROPOUT, LINEAR_DROPOUT,
+    #                ARC_DIM, LAB_DIM, LABSET, LR, 'cross', args.cle, args.ge_only, vocab, order20, labelled_ratio, args.tag_type)
     
-    entropy = LitEntropyLSTM(embeddings, prior, args, 'cross')
+    entropy = LitEntropyLSTM(embeddings, prior, args, 'cross', LABSET)
 
     early_stop = pl.callbacks.EarlyStopping(monitor='validation_loss', min_delta=0.01, patience=10, mode='min')
     
@@ -62,10 +62,21 @@ def semisupervised_train(args):
     results = trainer.test(entropy, module, verbose=True)
     print(results)
 
-def size_loop(args):
-    sizes = [100, 500, 1000, 4000]
+def size_loop_semi_supervised(args):
+    sizes = [1000, 4000]
     for size in sizes:
+        args.entropy = False
+        args.semi = True
+        args.limit_sentence_size = 0
+        args.transfer = False
+        args.ge_only = False
         args.train = size
         args.file = 'unlabelled' + str(size) + '.pickle'
-        args.model_name = 'semisupervised_chuliu_edmonds_' + str(size)
+        args.model_name = 'entropy-no-length-limit-' + str(size)
+        semisupervised_train(args)
+
+        
+        args.limit_sentence_size = 12
+        args.file = 'limit-12-' + str(size) + '.pickle'
+        args.model_name = 'entropy-limit-12-' + str(size)
         semisupervised_train(args)

@@ -1,11 +1,22 @@
+import argparse
 from dependency_parsers.data.processor import SentenceDataset
 from dependency_parsers.data.params import ROOT_TOKEN, ROOT_TAG, ROOT_LABEL
 
 class TagCounter():
-    def __init__(self, file):
+    def __init__(self, file=None, sentence_set=None):
+        if file is None and sentence_set is None:
+            raise Exception('Provide either a file to load from or a sentence set')
+        
+        if file is not None and sentence_set is not None:
+            raise Exception('Provide exactly one argument to work with')
+
         self.file = file
-        self.sentence_set = []
-        self.loaded = False
+        self.sentence_set = sentence_set
+        if file is not None:
+            self.loaded = False
+        else:
+            self.loaded = True
+
         self.tree = {}
         self.graph = {}
         
@@ -15,16 +26,17 @@ class TagCounter():
         self.vocabulary = self.sentence_set.getVocabulary()
         if sentence_length is not None:
             self.sentence_set = list(filter(lambda x: len(x[0]), self.sentence_set))
-        print('Loaded the training set. Number of sentences: {}'.format(len(self.sentence_set.sentences)))
+        self.sentence_set = self.sentence_set.sentences
+        print('Loaded the sentence set. Number of sentences: {}'.format(len(self.sentence_set)))
         self.loaded = True
 
     def edge_count(self, tag_type):
         if self.loaded is False:
             raise Exception("Sentences not loaded yet.")
 
-        if tag_type is 'xpos':
+        if tag_type == 'xpos':
             t = 2
-        elif tag_type is 'upos':
+        elif tag_type == 'upos':
             t = 1
         else:
             raise Exception("I do not know the tag type")
@@ -32,12 +44,12 @@ class TagCounter():
         tree_edges = {}
         graph_edges = {}
 
-        for sentence in self.sentence_set.sentences:
+        for sentence in self.sentence_set:
             for idx1 in range(len(sentence[0])):
                 for idx2 in range(len(sentence[0])):
                     if idx1 == idx2:
                         continue
-
+                    
                     xpos1 = sentence[t][idx1]
                     xpos2, parent2 = sentence[t][idx2], sentence[3][idx2]
                     
@@ -137,3 +149,13 @@ class TagCounter():
         counter.load(sentence_length)
         return counter.tag_search(f, min_occurence, tag_type)  
     
+    def get_statistics_from_file(file, min_occurence, tag_type, sentence_length=None, step=5):
+        counter = TagCounter(file)
+        counter.load(sentence_length)
+        return counter.get_statistics(min_occurence, tag_type, step)
+
+    def get_statistics(self, min_occurence, tag_type, step=5):
+        d = {}
+        for percentage in range(10,105,5):
+            d[str(percentage) + '%'] = self.tag_search(percentage/100, min_occurence, tag_type)
+        return d
