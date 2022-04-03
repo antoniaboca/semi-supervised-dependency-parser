@@ -52,11 +52,17 @@ class SentenceDataset(Dataset):
                     parents.append(int(token.head))
                 else:
                     continue
-
-                if token.lemma is None or token.upos is None or token.deprel is None:
+                
+                if token.upos is None or token.deprel is None:
+                    continue
+                
+                if token.form is None and token.lemma is None:
                     continue
 
-                word = token.form.lower()
+                if token.form is None:
+                    word = token.lemma.lower()
+                else:
+                    word = token.form.lower()
                 if word in words:
                     words[word] += 1
                 else:
@@ -69,11 +75,12 @@ class SentenceDataset(Dataset):
                     pos_tags[token.upos] = 1
                 tag_list.append(token.upos)
 
-                if token.xpos in adv_tags:
-                    adv_tags[token.xpos] += 1
-                else:
-                    adv_tags[token.xpos] = 1
-                adv_list.append(token.xpos)
+                if token.xpos is not None:
+                    if token.xpos in adv_tags:
+                        adv_tags[token.xpos] += 1
+                    else:
+                        adv_tags[token.xpos] = 1
+                    adv_list.append(token.xpos)
 
                 if token.deprel in label:
                     label[token.deprel] += 1
@@ -82,7 +89,6 @@ class SentenceDataset(Dataset):
                 
                 labels.append(token.deprel)
                 
-            
             self.sentences.append((word_list, tag_list, adv_list, parents, labels))
             self.parent_ids.append(parents)
 
@@ -277,7 +283,7 @@ def unlabelled_padder(samples):
 
     return {
         'sentence': padded_sent, 
-        'tags': padded_tags, 
+        'upos': padded_tags, 
         'xpos': padded_xpos,
         'parents': padded_parents,
         'labels': padded_labels,

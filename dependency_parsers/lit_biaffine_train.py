@@ -51,6 +51,6 @@ def size_loop(args):
     sizes = [1000, 2000, 4000, 8000, 12000]
     for size in sizes:
         args.train = size
-        args.file = 'train' + str(size) + '.pickle'
+        args.file = 'limit-12-' + str(size) + '.pickle'
         args.model_name = 'supervised_evaluation_' + str(size)
         biaffine_train(args)

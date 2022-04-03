@@ -1,6 +1,7 @@
 import pickle
 import random as rand
 import copy 
+import math
 
 from collections import deque
 from .processor import SentenceDataset, EmbeddingDataset, Embed
@@ -69,20 +70,37 @@ def create_buckets(set):
     for sentence, tag, xpos, parent, label, word_tag in set:
         val = len(sentence)
         if val not in buckets.keys():
-            buckets[val] = deque()
+            buckets[val] = []
         buckets[val].append((sentence, tag, xpos, parent, label, word_tag))
     return buckets
 
+def stratified_random_sampling(train_buckets, train_set, size):
+    rand_set = []
+    remainder = []
+    sampled = 0
+    for slen, elems in train_buckets.items():
+        sample_size = math.floor(1.0 * (len(elems) / len(train_set)) * size)
+        sampled += sample_size
+
+        sample = {*rand.sample(range(len(elems)), sample_size)}
+        for idx in range(len(elems)):
+            if idx in sample:
+                rand_set.append(elems[idx])
+            else:
+                remainder.append(elems[idx])
+    
+    rand.shuffle(remainder)
+    rand_set.extend(remainder[:(size - sampled)])
+    remainder = remainder[(size - sampled):]
+    rand.shuffle(rand_set)
+
+    return rand_set, remainder
+
 def bucket_save(train_buckets, loaded, file_name, size):
     train_set, test_set, dev_set, embeddings, vocab, tag_size, label_size = loaded
-    ranges = []
-    for bucket in train_buckets.keys():
-        ranges.extend([bucket] * len(train_buckets[bucket]))
-    
-    sample = rand.sample(ranges, size)
-    rand_set = [train_buckets[idx].pop() for idx in sample]
+    rand_set, remainder = stratified_random_sampling(train_buckets, train_set, size)
 
-    print(f'Saving sample of size {size} to {file_name}...')
+    print(f'Saving sample of size {len(train_set)} to {file_name}...')
     with open(file_name, 'wb') as file:
         pickle.dump({'train_labelled': rand_set, 
             'test': test_set, 
@@ -90,28 +108,14 @@ def bucket_save(train_buckets, loaded, file_name, size):
             'embeddings': embeddings, 
             'vocabulary': vocab,
             'TAGSET_SIZE': tag_size, 
-            'LABSET_SIZE': label_size
+            'LABSET_SIZE': label_size,
+            'remainder': remainder,
             }, file)
     print('Saved.')
 
 def bucket_unlabelled_save(train_buckets, loaded, file_name, size):
     train_set, test_set, dev_set, embeddings, vocab, tag_size, label_size = loaded
-
-    ranges = []
-    for bucket in train_buckets.keys():
-        ranges.extend([bucket] * len(train_buckets[bucket]))
-    
-    sample = rand.sample(ranges, size)
-    labelled_set = [train_buckets[idx].pop() for idx in sample]
-
-    remainder = []
-    for bucket in train_buckets.keys():
-        while train_buckets[bucket]:
-            remainder.append(train_buckets[bucket].pop())
-
-    # unlabelled_set = [(s, t) for s, t, _, _ in remainder] # get rid of parent and label
-    unlabelled_set = remainder
-    rand.shuffle(unlabelled_set)
+    labelled_set, unlabelled_set = stratified_random_sampling(train_buckets, train_set, size)
 
     for _, tags, _, _, _, _ in unlabelled_set:
         for tag in tags:

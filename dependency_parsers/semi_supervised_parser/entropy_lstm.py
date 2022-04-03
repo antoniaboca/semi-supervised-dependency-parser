@@ -9,6 +9,8 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
 
+from dependency_parsers.biaffine_parser.biaffine_lstm import LitLSTM
+from dependency_parsers.nn.layers import Biaffine, MLP
 
 from torch.nn.utils.rnn import pad_sequence, pad_packed_sequence, pack_padded_sequence
 from torch.nn import Linear, LSTM
@@ -19,111 +21,74 @@ from stanza.models.common.chuliu_edmonds import chuliu_edmonds_one_root
 
 import pytorch_lightning as pl
 
-class Biaffine(nn.Module):
-    def __init__(self, arc_dim, output_dim):
-        super().__init__()
-
-        self.W = nn.Parameter(torch.Tensor(output_dim, arc_dim, arc_dim))
-        self.reset_parameters()
-
-    def forward(self, head, dep):
-        head = head.unsqueeze(1)
-        dep = dep.unsqueeze(1)
-
-        scores = head @ self.W @ dep.transpose(-1,-2)
-        return scores.squeeze(1)
-
-    def reset_parameters(self):
-        nn.init.xavier_uniform_(self.W)
-
 class LitEntropyLSTM(pl.LightningModule):
-    def __init__(self, embeddings, f_star, embedding_dim, hidden_dim, num_layers, 
-                lstm_dropout, linear_dropout, arc_dim, lab_dim, num_labels, lr, loss_arg, cle_arg, ge_only):
+    def __init__(self, embeddings, f_star, args, loss, num_labels):
         super().__init__()
 
-        self.hidden_dim = hidden_dim
-        self.arc_dim = arc_dim
-        self.lab_dim = lab_dim
-        self.lr = lr
-        self.cle = cle_arg
-        self.prior = f_star
-        self.ge_only = ge_only
+        if loss == 'cross':
+            self.loss = nn.CrossEntropyLoss(ignore_index=-1)
+        elif loss == 'mtt':
+            self.loss = self.loss_function
+
+        self.transfer = args.transfer
         self.log_softmax = nn.LogSoftmax(dim=-1)
+        self.ge_only = args.ge_only
+
+        if args.transfer is True:
+            self.lr = args.lr
+            self.cle = args.cle
+            self.prior = f_star
+            self.model = LitLSTM.load_from_checkpoint('my_logs/default/version_73/checkpoints/epoch=15-step=1007.ckpt', 
+                            hparams_file='my_logs/default/version_73/hparams.yaml')
+            return    
+    
+        self.hidden_dim = args.hidden_dim
+        self.arc_dim = args.arc_dim
+        self.lab_dim = args.lab_dim
+        self.lr = args.lr
+        self.cle = args.cle
+        self.prior = f_star
+        
 
         self.lstm = LSTM(
-            input_size=embedding_dim, 
-            hidden_size=hidden_dim,
-            num_layers=num_layers,
-            dropout=lstm_dropout,
+            input_size=args.embedding_dim, 
+            hidden_size=args.hidden_dim,
+            num_layers=args.num_layers,
+            dropout=args.lstm_dropout,
             bidirectional=True
         )
 
         self.word_embedding = nn.Embedding.from_pretrained(torch.tensor(embeddings), 
                                                             padding_idx=0)
 
-        # dropout layer
-        self.dropout = nn.Dropout(linear_dropout)
+        # arc and label MLP layers
+        self.linear_dropout = args.linear_dropout
 
-        # arc linear layer
-        self.arc_linear_h = Linear(hidden_dim * 2, arc_dim)  # this is your g
-        self.arc_linear_d = Linear(hidden_dim * 2, arc_dim) # this is your f
-
-        #label linear layer 
-        self.lab_linear_h = Linear(hidden_dim * 2, lab_dim)
-        self.lab_linear_d = Linear(hidden_dim * 2, lab_dim)
-
-        #arc scores
-        self.arc_score_h = Linear(arc_dim, 1)
-        self.arc_score_d = Linear(arc_dim, 1)
-
-        #lab scores
-        self.lab_score_h = Linear(lab_dim, num_labels)
-        self.lab_score_d = Linear(lab_dim, num_labels)
+        self.MLP_arc = MLP(self.hidden_dim * 2, self.linear_dropout, self.arc_dim)
+        self.MLP_lab = MLP(self.hidden_dim * 2, self.linear_dropout, self.lab_dim)
 
         # biaffine layers
-        self.arc_biaffine = Biaffine(arc_dim, 1)
-        self.lab_biaffine = Biaffine(lab_dim, num_labels)
+        self.arc_biaffine = Biaffine(self.arc_dim, 1)
+        self.lab_biaffine = Biaffine(self.lab_dim, num_labels)
 
-        if loss_arg == 'cross':
-            self.loss = nn.CrossEntropyLoss(ignore_index=-1)
-        elif loss_arg == 'mtt':
-            self.loss = self.loss_function
-
-        self.log_loss = []
-    
     def configure_optimizers(self):
         optimizer = optim.Adam(self.parameters(), lr=self.lr)
         return optimizer
     
     def forward(self, x):
+        if self.transfer:
+            return self.model(x)
+
         lengths = x['lengths']
-
         embedding = self.word_embedding(x['sentence'])
-
         maxlen = embedding.shape[1]
 
-        # mask = torch.arange(maxlen).expand(len(lengths), maxlen) < lengths.unsqueeze(1)
-        
         embd_input = pack_padded_sequence(embedding, lengths, batch_first=True, enforce_sorted=False)
-        
         lstm_out, _ = self.lstm(embd_input.float())
         lstm_out, _ = pad_packed_sequence(lstm_out, batch_first=True)
         
-        # arcs
-        h_arc = self.dropout(F.relu(self.arc_linear_h(lstm_out)))
-        d_arc = self.dropout(F.relu(self.arc_linear_d(lstm_out)))
-
-        # labels
-        h_lab = self.dropout(F.relu(self.lab_linear_h(lstm_out)))
-        d_lab = self.dropout(F.relu(self.lab_linear_d(lstm_out)))
-
-        # arc scores
-        h_score_arc = self.arc_score_h(h_arc)
-        d_score_arc = self.arc_score_d(d_arc)
-
-        # label scores
-        #h_score_lab = self.lab_score_h(h_lab)
-        #d_score_lab = self.lab_score_d(d_lab)
+        h_arc, d_arc, h_score_arc, d_score_arc = self.MLP_arc(lstm_out)
+        h_lab, d_lab, _, _ = self.MLP_lab(lstm_out)
 
         arc_scores = self.arc_biaffine(h_arc, d_arc) + h_score_arc + d_score_arc.transpose(1, 2)
         lab_scores = self.lab_biaffine(h_lab, d_lab)
@@ -132,8 +97,6 @@ class LitEntropyLSTM(pl.LightningModule):
         
     def training_step(self, batch, batch_idx):
         unlabelled = batch['unlabelled']
-        labelled = batch['labelled']
-
         features = unlabelled['features']
 
         # COMPUTE LOSS FOR UNLABELLED DATA
@@ -148,7 +111,7 @@ class LitEntropyLSTM(pl.LightningModule):
             assert torch.all(log_potentials <= 0)
         except AssertionError:
             import ipdb; ipdb.post_mortem()
-
+        
         dist = NonProjectiveDependencyCRF(log_potentials, lengths - torch.ones(len(lengths)))
 
         assert not torch.isnan(dist.partition).any()
@@ -164,11 +127,14 @@ class LitEntropyLSTM(pl.LightningModule):
         self.log('unlabelled_loss', unlabelled_loss.detach(), on_step=True, on_epoch=True, logger=True)
 
         if self.ge_only:
+            self.log('training_loss', unlabelled_loss.detach(), on_step=True, on_epoch=True, logger=True)
             return {
-                'loss': unlabelled_loss
+                'loss': unlabelled_loss,
+                'unlabelled_loss': unlabelled_loss,
             }
 
         # COMPUTE LOSS FOR LABELLED DATA
+        labelled = batch['labelled']
         l_arc_scores, l_lab_scores = self(labelled)
         batch_labelled, maxlen_labelled, _ = l_arc_scores.shape
         lengths = labelled['lengths']
@@ -224,7 +190,59 @@ class LitEntropyLSTM(pl.LightningModule):
         targets = val_batch['parents']
         labels = val_batch['labels']
         
-        batch, maxlen = targets.shape
+        arc_scores, lab_scores = self(val_batch)
+        batch_unlabelled, maxlen_unlabelled, _ = arc_scores.shape
+        lengths = val_batch['lengths']
+        
+        potentials = self.score_to_diagonal(arc_scores)
+        log_potentials = self.apply_log_softmax(potentials, lengths)
+
+        try:
+            assert torch.all(log_potentials <= 0)
+        except AssertionError:
+            #import ipdb; ipdb.post_mortem()
+            pass
+        
+        dist = NonProjectiveDependencyCRF(log_potentials, lengths - torch.ones(len(lengths)))
+
+        assert not torch.isnan(dist.partition).any()
+        assert not torch.isinf(dist.partition).any()
+        assert not torch.isinf(dist.marginals).any()
+        assert not torch.isnan(dist.marginals).any()
+
+        #Z = dist.partition
+        #total_loss = self.partition_loss(torch.clone(potentials), torch.clone(parents), lengths, Z)
+        #diag_features = self.feature_to_diagonal(features.float())
+        unlabelled_loss = self.entropy_loss(dist.marginals, torch.clone(-log_potentials))
+
+        self.log('unlabelled_loss', unlabelled_loss.detach(), on_step=True, on_epoch=True, logger=True)
+
+        #if self.ge_only:
+        #    return {
+        #        'loss': unlabelled_loss
+        #    }
+
+        # COMPUTE LOSS FOR LABELLED DATA
+        l_arc_scores, l_lab_scores = self(val_batch)
+        batch_labelled, maxlen_labelled, _ = l_arc_scores.shape
+        lengths = val_batch['lengths']
+        parents = val_batch['parents']
+
+        labelled_loss = self.arc_loss(l_arc_scores, parents)
+        # lab_loss = self.lab_loss(lab_scores, parents, labels)
+
+        batch_total = batch_labelled + batch_unlabelled
+        total_loss = (batch_labelled / batch_total) * labelled_loss + (batch_unlabelled / batch_total) * unlabelled_loss
+        # total_loss = unlabelled_loss
+        targets = torch.argmax(l_arc_scores, dim=2)
+
+        num_correct = 0
+        total = 0
+
+        num_correct += torch.count_nonzero((targets == parents) * (parents != -1))
+        total += torch.count_nonzero((parents == parents) * (parents != -1))
+        
+        """
         arc_scores, lab_scores = self(val_batch)
 
         arc_loss = self.arc_loss(arc_scores,targets)
@@ -237,12 +255,13 @@ class LitEntropyLSTM(pl.LightningModule):
         parents = torch.argmax(arc_scores, dim=2)
         num_correct += torch.count_nonzero((parents == targets) * (targets != -1))
         total += torch.count_nonzero((targets == targets)* (targets != -1))
+        """
 
-        self.log('validation_loss', total_loss.detach(), on_step=False, on_epoch=True, logger=True)
-        self.log('validation_arc_loss', arc_loss.detach(), on_step=False, on_epoch=True, logger=True)
-        self.log('validation_lab_loss', lab_loss.detach(), on_step=False, on_epoch=True, logger=True)
-
-        return {'loss': total_loss, 'correct': num_correct, 'total': total, 'arc_loss':arc_loss.detach(), 'lab_loss': lab_loss.detach()}
+        self.log('validation_loss', total_loss, on_step=False, on_epoch=True, logger=True)
+        self.log('validation_labelled_loss', labelled_loss.detach(), on_step=False, on_epoch=True, logger=True)
+        self.log('validation_unlabelled_loss', unlabelled_loss.detach(), on_step=False, on_epoch=True, logger=True)
+        
+        return {'loss': total_loss, 'correct': num_correct, 'total': total, 'labelled_loss':labelled_loss.detach(), 'unlabelled_loss': unlabelled_loss.detach()}
 
     def validation_epoch_end(self, preds):
         correct = 0
@@ -250,16 +269,21 @@ class LitEntropyLSTM(pl.LightningModule):
         loss = 0
         arc_loss = 0.0
         lab_loss = 0.0
+        labelled_loss = 0.0
+        unlabelled_loss = 0.0
         for pred in preds:
             correct += pred['correct']
             total += pred['total']
             loss += pred['loss']
-            arc_loss += pred['arc_loss'] / len(preds)
-            lab_loss += pred['lab_loss'] / len(preds)
+            labelled_loss += pred['labelled_loss']
+            unlabelled_loss += pred['unlabelled_loss']
+            # arc_loss += pred['arc_loss'] / len(preds)
+            # lab_loss += pred['lab_loss'] / len(preds)
 
+        self.log('validation_loss', loss, on_step=False, on_epoch=True, logger=True)
         self.log("validation_accuracy",correct/total, on_epoch=True, logger=True)
 
-        print('\nAccuracy on validation set: {:3.3f} | Loss : {:3.3f} | Arc loss: {:3.3f} | Lab loss: {:3.3f}'.format(correct/total, loss/len(preds), arc_loss.detach(), lab_loss.detach()))
+        print('\nAccuracy on validation set: {:3.3f} | Loss : {:3.3f} | Labelled loss: {:3.3f} | Unlabelled loss: {:3.3f}'.format(correct/total, loss/len(preds), labelled_loss.detach()/len(preds), unlabelled_loss.detach()/len(preds)))
         return {'accuracy': correct / total, 'loss': loss/len(preds)}
 
     def test_step(self, test_batch, batch_idx):
@@ -276,9 +300,9 @@ class LitEntropyLSTM(pl.LightningModule):
             trees = torch.argmax(arc_scores, dim=2)
             arc_loss = self.arc_loss(arc_scores, targets)
 
-        lab_loss = self.lab_loss(lab_scores, targets, labels)
+        #lab_loss = self.lab_loss(lab_scores, targets, labels)
 
-        total_loss = arc_loss + lab_loss
+        total_loss = arc_loss #+ lab_loss
         num_correct = 0
         total = 0
 
@@ -287,13 +311,23 @@ class LitEntropyLSTM(pl.LightningModule):
 
         self.log('test_loss', total_loss.detach(), on_step=False, on_epoch=True, logger=True)
         self.log('test_arc_loss', arc_loss.detach(), on_step=False, on_epoch=True, logger=True)
-        self.log('test_lab_loss', lab_loss.detach(), on_step=False, on_epoch=True, logger=True)
+        #self.log('test_lab_loss', lab_loss.detach(), on_step=False, on_epoch=True, logger=True)
 
-        return {'loss': total_loss, 'correct': num_correct, 'total': total, 'arc_loss':arc_loss.detach(), 'lab_loss': lab_loss.detach()}
+        return {'loss': total_loss, 'correct': num_correct, 'total': total, 'arc_loss':arc_loss.detach()}
 
     
     def test_epoch_end(self, preds):
-        return self.validation_epoch_end(preds)
+        correct = 0
+        total = 0
+        loss = 0.0
+        for pred in preds:
+            correct += pred['correct']
+            total += pred['total']
+            loss += pred['loss']
+        
+        print('\nAccuracy on test set: {:3.3f} | Loss : {:3.3f}\n'.format(correct/total, loss/len(preds)))
+        
+        return {'accuracy': correct/total, 'loss': loss}
 
     def GE_loss(self, scores, features):
         X = torch.einsum('bij,bijf->bf', scores, features)
@@ -306,25 +340,6 @@ class LitEntropyLSTM(pl.LightningModule):
         X = torch.einsum('bij,bij->b', marginals, masked).sum()
         return X
 
-    def lab_loss(self, S_lab, parents, labels):
-        """Compute the loss for the label predictions on the gold arcs (heads)."""
-        heads = torch.clone(parents)
-        heads[heads == -1] = 0
-        heads = heads.unsqueeze(1).unsqueeze(2)              # [batch, 1, 1, sent_len]
-        heads = heads.expand(-1, S_lab.size(1), -1, -1)      # [batch, n_labels, 1, sent_len]
-        S_lab = torch.gather(S_lab, 2, heads).squeeze(2)     # [batch, n_labels, sent_len]
-        S_lab = S_lab.transpose(-1, -2)                      # [batch, sent_len, n_labels]
-        S_lab = S_lab.contiguous().view(-1, S_lab.size(-1))  # [batch*sent_len, n_labels]
-        labels = labels.view(-1)                             # [batch*sent_len]
-        return self.loss(S_lab, labels)
-
-    def arc_loss(self, S_arc, heads):
-        """Compute the loss for the arc predictions."""
-        #S_arc = S_arc.transpose(-1, -2)                      # [batch, sent_len, sent_len]
-        S_arc = S_arc.contiguous().view(-1, S_arc.size(-1))  # [batch*sent_len, sent_len]
-        heads = heads.view(-1)                               # [batch*sent_len]
-        return self.loss(S_arc, heads)
-    
     def edmonds_arc_loss(self, S_arc, lengths, heads):
         S = torch.clone(S_arc.detach())
         batch_size = S.size(0)
@@ -341,27 +356,12 @@ class LitEntropyLSTM(pl.LightningModule):
 
         return batched, self.arc_loss(S_arc, heads)
 
-    def new_loss(self, arc_scores, lengths, targets):
-        batch, maxlen, _ = arc_scores.shape
-        S = NonProjectiveDependencyCRF(arc_scores, lengths)
-
-        S = S.reshape((batch * maxlen, maxlen))
-        valid = torch.reshape(targets, (batch * maxlen,))
-
-        offset = torch.arange(start=0, end=maxlen * batch, step=maxlen).unsqueeze(-1).expand(-1, maxlen).reshape((batch * maxlen,))
-        indexer = torch.arange(maxlen).repeat(batch, 1).reshape((batch*maxlen,))
-        assert valid.shape == indexer.shape
-        
-        valid = valid + offset
-
-        # get the sum of edges of each target tree in the batch
-        sums = S[valid, indexer].reshape(batch, maxlen)
-
-        # compute the negative log likelihood of each tree
-
-        P = sums.sum(dim=-1)
-
-        return P
+    def arc_loss(self, S_arc, heads):
+        """Compute the loss for the arc predictions."""
+        #S_arc = S_arc.transpose(-1, -2)                      # [batch, sent_len, sent_len]
+        S_arc = S_arc.contiguous().view(-1, S_arc.size(-1))  # [batch*sent_len, sent_len]
+        heads = heads.view(-1)                               # [batch*sent_len]
+        return self.loss(S_arc, heads)
 
     def apply_log_softmax(self, scores, lengths):
         lengths = lengths - torch.ones(len(lengths))

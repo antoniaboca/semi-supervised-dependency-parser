@@ -7,3 +7,9 @@
 /dependency-parsers/data/*.pickle
 lightning_logs/
 *_logs/
+logs/
+conllu/
+embeddings/
+low_resource_languages/
+pickle/
+
