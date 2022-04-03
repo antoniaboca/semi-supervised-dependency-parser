@@ -10,45 +10,19 @@ import torch.nn.functional as F
 from torch.nn.utils.rnn import pad_packed_sequence, pack_padded_sequence
 from torch.nn import LSTM
 
-from dependency_parsers.nn.layers import Biaffine, MLP
+from dependency_parsers.nn.layers import Biaffine, MLP, BiaffineLSTM
 from dependency_parsers.nn.losses import lab_loss, arc_loss, edmonds_arc_loss
 
 
 import pytorch_lightning as pl
 
-class LitLSTM(pl.LightningModule):
-    def __init__(self, embeddings, embedding_dim, hidden_dim, num_layers, 
-                lstm_dropout, linear_dropout, arc_dim, lab_dim, num_labels, lr, loss_arg, cle_arg):
+class LitSupervisedLSTM(pl.LightningModule):
+    def __init__(self, embeddings, args):
         super().__init__()
 
         self.save_hyperparameters()
-        self.hidden_dim = hidden_dim
-        self.arc_dim = arc_dim
-        self.lab_dim = lab_dim
-        self.lr = lr
-        self.cle = cle_arg
 
-        self.lstm = LSTM(
-            input_size=embedding_dim, 
-            hidden_size=hidden_dim,
-            num_layers=num_layers,
-            dropout=lstm_dropout,
-            bidirectional=True
-        )
-
-        self.word_embedding = nn.Embedding.from_pretrained(torch.tensor(embeddings), 
-                                                            padding_idx=0)
-
-        self.linear_dropout = linear_dropout
-
-        # Linear layers 
-
-        self.MLP_arc = MLP(self.hidden_dim * 2, self.linear_dropout, self.arc_dim)
-        self.MLP_lab = MLP(self.hidden_dim * 2, self.linear_dropout, self.lab_dim)
-        
-        # biaffine layers
-        self.arc_biaffine = Biaffine(arc_dim, 1)
-        self.lab_biaffine = Biaffine(lab_dim, num_labels)
+        self.model = BiaffineLSTM(embeddings, args)
 
         self.arc_loss = arc_loss
         self.lab_loss = lab_loss
@@ -61,21 +35,7 @@ class LitLSTM(pl.LightningModule):
         return optimizer
     
     def forward(self, x):
-        lengths = x['lengths']
-        embedding = self.word_embedding(x['sentence'])
-        maxlen = embedding.shape[1]
-
-        embd_input = pack_padded_sequence(embedding, lengths, batch_first=True, enforce_sorted=False)
-        lstm_out, _ = self.lstm(embd_input.float())
-        lstm_out, _ = pad_packed_sequence(lstm_out, batch_first=True)
-        
-        h_arc, d_arc, h_score_arc, d_score_arc = self.MLP_arc(lstm_out)
-        h_lab, d_lab, _, _ = self.MLP_lab(lstm_out)
-
-        arc_scores = self.arc_biaffine(h_arc, d_arc) + h_score_arc + d_score_arc.transpose(1, 2)
-        lab_scores = self.lab_biaffine(h_lab, d_lab)
-
-        return arc_scores, lab_scores
+        return self.model(x)
         
     def training_step(self, train_batch, batch_idx):
         parents = train_batch['parents']

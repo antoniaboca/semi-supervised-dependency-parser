@@ -197,3 +197,8 @@ def GE_loss(scores, features, prior):
     Y = X - prior
     return 0.5 * (Y.unsqueeze(-2) @ Y.unsqueeze(-1)).squeeze(-1).squeeze(-1)
 
+def entropy_loss(marginals, scores):
+    mask = scores == inf
+    masked = scores.masked_fill(mask, 0.0)
+    X = torch.einsum('bij,bij->b', marginals, masked).sum()
+    return X

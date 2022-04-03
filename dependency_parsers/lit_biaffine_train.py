@@ -1,8 +1,6 @@
-from torch.nn.modules.loss import CrossEntropyLoss
 from .lit_data_module import DataModule
-from .biaffine_parser.biaffine_lstm import LitLSTM
+from .biaffine_parser.biaffine_lstm import LitSupervisedLSTM
 
-import torch
 import pytorch_lightning as pl
 
 def biaffine_train(args):
@@ -31,14 +29,13 @@ def biaffine_train(args):
     LABSET = module.LABSET_SIZE
     embeddings = module.embeddings
     
-    model = LitLSTM(embeddings, EMBEDDING_DIM, HIDDEN_DIM, NUM_LAYERS, LSTM_DROPOUT, LINEAR_DROPOUT,
-                    ARC_DIM, LAB_DIM, LABSET, LR, 'cross', args.cle)
+    model = LitSupervisedLSTM(embeddings, args)
 
     early_stop = pl.callbacks.EarlyStopping(monitor='validation_loss', min_delta=0.01, patience=5, mode='min')
     
-    logger = pl.loggers.TensorBoardLogger('my_logs/')
+    logger = pl.loggers.TensorBoardLogger('logs/default_logs/')
     if args.name is not None:
-        logger = pl.loggers.TensorBoardLogger('evaluation_logs/', sub_dir=args.name)
+        logger = pl.loggers.TensorBoardLogger('logs/evaluation_logs/', sub_dir=args.name)
         
     trainer = pl.Trainer(max_epochs=NUM_EPOCH, logger=logger, log_every_n_steps=10, flush_logs_every_n_steps=50,callbacks=[early_stop])
     trainer.fit(model, module)

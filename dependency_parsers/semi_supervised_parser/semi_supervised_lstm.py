@@ -1,72 +1,39 @@
-from torch.nn.modules import linear
-from dependency_parsers.data.processor import PAD_VALUE, unlabelled_padder
-from dependency_parsers.nn.layers import Biaffine, MLP
-from dependency_parsers.nn.losses import arc_loss, edmonds_arc_loss, GE_loss
-from dependency_parsers.nn.transform import score_to_diagonal, apply_log_softmax, feature_to_diagonal
 import torchmetrics
+
+from numpy import inf
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
 import torch.nn.functional as F
-
 from torch.nn.utils.rnn import pad_sequence, pad_packed_sequence, pack_padded_sequence
 from torch.nn import Linear, LSTM
 
-from numpy import inf
+from dependency_parsers.nn.layers import BiaffineLSTM
+from dependency_parsers.nn.losses import arc_loss, edmonds_arc_loss, GE_loss
+from dependency_parsers.nn.transform import score_to_diagonal, apply_log_softmax, feature_to_diagonal
 
 from torch_struct import NonProjectiveDependencyCRF
-
 from stanza.models.common.chuliu_edmonds import chuliu_edmonds_one_root
-
 import pytorch_lightning as pl
 
 class LitSemiSupervisedLSTM(pl.LightningModule):
-    def __init__(self, embeddings, f_star, embedding_dim, hidden_dim, num_layers, 
-                lstm_dropout, linear_dropout, arc_dim, lab_dim, num_labels, lr, loss_arg, cle_arg, ge_only, vocabulary, order, labelled_ratio, tag_type):
+    def __init__(self, embeddings, f_star, vocabulary, order, args):
         super().__init__()
         self.save_hyperparameters()
 
-        self.hidden_dim = hidden_dim
-        self.arc_dim = arc_dim
-        self.lab_dim = lab_dim
-        self.lr = lr
-        self.cle = cle_arg
+        self.cle = args.cle_arg
         self.prior = f_star
-        self.ge_only = ge_only
+        self.ge_only = args.ge_only
         self.vocabulary = vocabulary
         self.order = order
-        self.labelled_ratio = labelled_ratio
-        self.tag_type = tag_type
+        self.labelled_ratio = args.labelled_ratio
+        self.tag_type = args.tag_type
 
-        self.lstm = LSTM(
-            input_size=embedding_dim, 
-            hidden_size=hidden_dim,
-            num_layers=num_layers,
-            dropout=lstm_dropout,
-            bidirectional=True
-        )
+        self.model = BiaffineLSTM(embeddings, args)
 
-        self.word_embedding = nn.Embedding.from_pretrained(torch.tensor(embeddings), 
-                                                            padding_idx=0)
-
-        # arc and label MLP layers
-        self.linear_dropout = linear_dropout
-        
-        self.MLP_arc = MLP(self.hidden_dim * 2, self.linear_dropout, self.arc_dim)
-        self.MLP_lab = MLP(self.hidden_dim * 2, self.linear_dropout, self.lab_dim)
-
-        # biaffine layers
-        self.arc_biaffine = Biaffine(arc_dim, 1)
-        self.lab_biaffine = Biaffine(lab_dim, num_labels)
-
-        if loss_arg == 'cross':
-            self.loss = nn.CrossEntropyLoss(ignore_index=-1)
-        elif loss_arg == 'mtt':
-            self.loss = self.loss_function
-
-        self.log_loss = []
+        self.loss = nn.CrossEntropyLoss(ignore_index=-1)
     
     def configure_optimizers(self):
         optimizer = optim.Adam(self.parameters(), lr=self.lr)
@@ -107,21 +74,7 @@ class LitSemiSupervisedLSTM(pl.LightningModule):
         return (oracle_edges / total_edges)
 
     def forward(self, x):
-        lengths = x['lengths']
-        embedding = self.word_embedding(x['sentence'])
-        maxlen = embedding.shape[1]
-
-        embd_input = pack_padded_sequence(embedding, lengths, batch_first=True, enforce_sorted=False)
-        lstm_out, _ = self.lstm(embd_input.float())
-        lstm_out, _ = pad_packed_sequence(lstm_out, batch_first=True)
-
-        h_arc, d_arc, h_score_arc, d_score_arc = self.MLP_arc(lstm_out)
-        h_lab, d_lab, _, _ = self.MLP_lab(lstm_out)
-
-        arc_scores = self.arc_biaffine(h_arc, d_arc) + h_score_arc + d_score_arc.transpose(1, 2)
-        lab_scores = self.lab_biaffine(h_lab, d_lab)
-
-        return arc_scores, lab_scores
+        return self.model(x)
         
     def training_step(self, batch, batch_idx):
         edge_ratio = self.assert_features(batch)
