@@ -9,6 +9,19 @@ from .processor import SentenceDataset, EmbeddingDataset, Embed
 from .params import OBJECT_FILE, ROOT_TOKEN, ROOT_LABEL, ROOT_TAG
 
 def file_load(args):
+    """
+    Function to load the training, validation and testing datasets and 
+    the Embeddings file.
+
+    Args:
+        args (object): Object containg command line arguments used to 
+            configure loading and processing parameters.
+
+    Returns:
+        tuple: Tuple of PyTorch Dataset objects: (list of training sentences, 
+            list of test sentences, list of validation sentences, embeddings array, 
+            the number of UPOS tags, the number of edge labels found)
+    """
     TRAIN_FILE = args.train_data
     VAL_FILE = args.validation_data
     TEST_FILE = args.testing_data
@@ -49,6 +62,12 @@ def file_load(args):
     return embedded_set, embed_test_set, embed_dev_set, embeddings, vocab, len(training_set.pos_to_index), len(training_set.label_to_index)
 
 def file_save(args):
+    """Function that saves datasets to pickle files.
+
+    Args:
+        args (object): Object containg command line arguments used to 
+            configure loading and processing parameters.
+    """
     train_set, test_set, dev_set, embeddings, vocab, tag_size, label_size = file_load(args)
     OBJECT_FILE = args.save_to_pickle_file
     
@@ -66,6 +85,16 @@ def file_save(args):
     print('Saved.')
 
 def create_buckets(set):
+    """Function that creates buckets of sentences based on their length.
+
+    Args:
+        set (list): List of sentences to bucket.
+
+    Returns:
+        dict: Dictionary where each key is a sentence length and each value
+            is a list of tuples; each tuple contains the indexed sentence and 
+            its annotations.
+    """
     buckets = {}
     for sentence, tag, xpos, parent, label, word_tag in set:
         val = len(sentence)
@@ -75,6 +104,18 @@ def create_buckets(set):
     return buckets
 
 def stratified_random_sampling(train_buckets, train_set, size):
+    """Algorithm to do stratified random sampling from buckets of lengths.
+
+    Args:
+        train_buckets (dict): Dictionary where each key is a sentence length and each value
+            is a list of tuples; each tuple contains the indexed sentence and 
+            its annotations.
+        train_set (list): Unbucketed sentence set.
+        size (int): Size of the random sample.
+
+    Returns:
+        tuple: Pair of sampled set of sentences and the remaining sentences.
+    """
     rand_set = []
     remainder = []
     sampled = 0
@@ -97,6 +138,20 @@ def stratified_random_sampling(train_buckets, train_set, size):
     return rand_set, remainder
 
 def bucket_save(train_buckets, loaded, file_name, size):
+    """
+    Function that creates a sample from a dictionary of buckets and saves the sample
+    to a pickle file (for the supervised context).
+
+    Args:
+        train_buckets (dict): Dictionary where each key is a sentence length and each value
+            is a list of tuples; each tuple contains the indexed sentence and 
+            its annotations.
+        loaded (tuple): Tuple of PyTorch Dataset objects: (list of training sentences, 
+            list of test sentences, list of validation sentences, embeddings array, 
+            the number of UPOS tags, the number of edge labels found)
+        file_name (str): File to save the sample to.
+        size (int): Size of desired sample.
+    """
     train_set, test_set, dev_set, embeddings, vocab, tag_size, label_size = loaded
     rand_set, remainder = stratified_random_sampling(train_buckets, train_set, size)
 
@@ -114,6 +169,23 @@ def bucket_save(train_buckets, loaded, file_name, size):
     print('Saved.')
 
 def bucket_unlabelled_save(train_buckets, loaded, file_name, size):
+    """ 
+    Function that creates a sample from a dictionary of buckets and saves the sample
+    to a pickle file (for the semi-supervised context). This function splits the training
+    set into 'labelled' and 'unlabelled' sentences. The labelled set is sampled using 
+    stratified random sampling, while the unlabelled set is formed of the remaining
+    sentences.
+
+    Args:
+        train_buckets (dict): Dictionary where each key is a sentence length and each value
+            is a list of tuples; each tuple contains the indexed sentence and 
+            its annotations.
+        loaded (tuple): Tuple of PyTorch Dataset objects: (list of training sentences, 
+            list of test sentences, list of validation sentences, embeddings array, 
+            the number of UPOS tags, the number of edge labels found)
+        file_name (str): File to save the sample to.
+        size (int): Size of the labelled sample.
+    """
     train_set, test_set, dev_set, embeddings, vocab, tag_size, label_size = loaded
     labelled_set, unlabelled_set = stratified_random_sampling(train_buckets, train_set, size)
 
@@ -135,6 +207,14 @@ def bucket_unlabelled_save(train_buckets, loaded, file_name, size):
     print('Saved.')
 
 def bucket_loop(args):
+    """
+    Function that creates samples of labelled data for the supervised context
+    for 7 different sample sizes.
+
+    Args:
+        args (object): Object containg command line arguments used to 
+            configure loading and processing parameters.
+    """
     loaded = file_load(args)
     train_buckets = create_buckets(loaded[0])
     data_size = [1000, 2000, 4000, 6000, 8000, 10000, 12000]
@@ -143,6 +223,13 @@ def bucket_loop(args):
         bucket_save(aux_buckets, loaded, 'train' + str(size) + '.pickle', size)
 
 def bucket_unlabelled_loop(args):
+    """Function that creates samples of labelled and unlabelled data for the
+    semi-supervised context for 4 different sample sizes.
+
+    Args:
+        args (object): Object containg command line arguments used to 
+            configure loading and processing parameters.
+    """
     loaded = file_load(args)
     train_buckets = create_buckets(loaded[0])
     data_size = [100, 500, 1000, 4000]

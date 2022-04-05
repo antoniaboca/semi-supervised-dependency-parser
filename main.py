@@ -1,5 +1,5 @@
 import argparse
-from dependency_parsers.lit_biaffine_train import biaffine_train, size_loop
+from dependency_parsers.lit_supervised_train import biaffine_train, size_loop
 from dependency_parsers.lit_semi_supervised_train import semisupervised_train, size_loop_semi_supervised
 from dependency_parsers.data.load import file_save, bucket_loop, bucket_unlabelled_loop
 
@@ -20,7 +20,7 @@ def main():
     model.add_argument('--epochs', type=int, default=50, help='Number of epochs to train on')
     model.add_argument('--lr', type=float, default=1e-3, help='Learning rate of the optimizer')
     model.add_argument('--linear-dropout', type=float, default=0.1, help='Add dropout to the linear layers')
-    model.add_argument('--file', type=str, default='dependency_parsers/data/cache.pickle', help='File containing formatted input data')
+    model.add_argument('--file', type=str, default='pickle/cache.pickle', help='File containing formatted input data')
     model.add_argument('--cle', action='store_true', help='Use the chuliu-edmonds algorithm to create trees for testing phase')
     model.add_argument('--semi', action='store_true', help='Use the semi-supervised dependency parser')
     model.add_argument('--transfer', action='store_true', help='Use the weights of a supervised parser')
@@ -32,13 +32,13 @@ def main():
     model.add_argument('--labelled-loss-ratio', type=float, default=None)
     model.add_argument('--tag-type', type=str, choices=['xpos', 'upos'], default='xpos')
     model.add_argument('--model', type=str, choices=['ge', 'entropy'], default='ge')
-    
+
     data = parser.add_argument_group('Dataset size')
     data.add_argument('--train', type=int, default=20000, help='Max amount of sentences to load for training')
     data.add_argument('--validation', type=int, default=4000, help='Maximum sentences to load for validation')
     data.add_argument('--test', type=int, default=4000, help='Maximum sentences to test on')
     data.add_argument('--embedding-dim', type=int, default=100, help='The dimension of the pretrained embeddings')
-    data.add_argument('--save-to-pickle-file', type=str, default='dependency_parsers/data/cache.pickle', help='File where to save formatted input data')
+    data.add_argument('--save-to-pickle-file', type=str, default='pickle/cache.pickle', help='File where to save formatted input data')
 
     loader = parser.add_argument_group('Data loading arguments')
     loader.add_argument('--train-data', type=str, default='./conllu/en_ewt-ud-train.conllu')

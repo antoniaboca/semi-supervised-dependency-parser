@@ -13,7 +13,24 @@ PAD_VALUE = -100
 PAD_IDX = 0
 
 class SentenceDataset(Dataset):
+    """PyTorch Dataset object that processes conllu files."""
     def __init__(self, file, ROOT_TOKEN, ROOT_TAG, ROOT_LABEL, vocab=None, transform=None, sentence_len=None):
+        """
+            The Constructor of the SentenceDataset class. The Constructor processes 
+            conllu files to create datasets to work with.
+
+        Args:
+            file (str): Conllu file to load sentences from.
+            ROOT_TOKEN (str): ROOT token to add at the beginning of each sentence.
+            ROOT_TAG (str): ROOT tag to add at the beginning of each tag list.
+            ROOT_LABEL (str): ROOT label to add at the beginning of each label list.
+            vocab (allennlp.data.Vocabulary, optional): Prior vocabulary to use for
+                words found in the dataset. Defaults to None.
+            transform (func, optional): Transformation to apply to each element in the
+                dataset. Defaults to None.
+            sentence_len (int, optional): Maximum accepted length of sentence. Sentences
+                with a greater length than this one will be skipped. Defaults to None.
+        """
         self.transform = transform
         
         words = {}
@@ -137,9 +154,26 @@ class SentenceDataset(Dataset):
 
 
     def __len__(self):
+        """Return the number of available sentences.
+
+        Returns:
+            int: Length of sentence set.
+        """
         return len(self.index_set)
     
     def __getitem__(self, index):
+        """Returns a sentences (and its annotations) from the dataset.
+
+        Args:
+            index (int): The index of the sentence to fetch.
+
+        Raises:
+            AssertionError: Checks that all sentences contain the correct number
+            of annotations.
+
+        Returns:
+            tuple: Word, upos, xpos, label indexes for each sentence and string XPOS tags.
+        """
         if torch.is_tensor(index):
             index = index.tolist()
 
@@ -168,10 +202,24 @@ class SentenceDataset(Dataset):
         return sample
     
     def getVocabulary(self):
+        """Returns the vocabulary used for this dataset."""
         return self.vocabulary
 
 class EmbeddingDataset(Dataset):
+    """Dataset object that processes .txt files that contain GloVe Embeddings."""
     def __init__(self, filename, dim, words_to_index, ROOT_TOKEN):
+        """
+        Constructor method for the embedding dataset. This constructor loads and 
+        processes embeddings from files. The class removes embeddings of words that
+        are not present in the vocabulary of the training set.
+
+        Args:
+            filename (str): file to load embeddings from.
+            dim (int): Embedding dimension.
+            words_to_index (dict): Dictionary with words as keys and their vocabulary
+                indexes as values.
+            ROOT_TOKEN (str): ROOT token to be used.
+        """
         self.embeddings = {}
         self.dim = dim
         self.embeddings[ROOT_TOKEN] = np.random.rand(dim) # dummy random embedding for the root token
@@ -202,15 +250,18 @@ class EmbeddingDataset(Dataset):
         self.idx_embeds = indexed
     
     def __len__(self):
+        """Returns the number of embeddings."""
         return len(self.idx_embeds)
     
     def __getitem__(self, index):
+        """Return the embeddings of a particular word, given its index."""
         if torch.is_tensor(index):
             index = index.tolist()
 
         return self.idx_embeds[index]
 
 class Embed(object):
+    """Transformation object that embeds a given sentence."""
     def __init__(self, embeddings):
         self.embeddings = embeddings
     
@@ -221,10 +272,16 @@ class Embed(object):
         return (sentence, embedded, tags, xpos, parents)
 
 def labelled_padder(samples):
-    # batch of samples to be expected to look like
-    # [(index_sent1, tag_set1, xpos_set1, parent_set1, label_set1, word_tag_set1), ...]
+    """Padding function used to format the input to the supervised neural network.
 
-    #import ipdb; ipdb.set_trace()
+    Args:
+        samples (list): Batch of samples; each sample is a tuple expected to
+            look like: (word indexes, UPOS idexes, XPOS indexes, 
+            parent indexes, label indexes, string xpos tags)
+
+    Returns:
+        dict: Dictionary were each value is a list.
+    """
     indexes, tags, xpos, parents, labels, word_tags = zip(*samples)
 
     sent_lens = torch.tensor([len(sent) for sent in indexes])
@@ -254,8 +311,15 @@ def labelled_padder(samples):
     }
 
 def unlabelled_padder(samples):
-    # batch of samples to be expected to look like
-    # [(idxs1, tags1, features1), ...]
+    """Paddding function used to format the input to the semi-supervised neural network.
+
+    Args:
+        samples (list): Batch of samples; each sample is a tuple expected to look like:
+            (word indexes, upos indexes, xpos indexes, labels, string xpos tags, features)
+
+    Returns:
+        dict: Dictionary were each value is a list.
+    """
 
     indexes, tags, xpos, parents, labels, word_tags, features = zip(*samples)
 
