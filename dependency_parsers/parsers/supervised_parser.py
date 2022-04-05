@@ -17,7 +17,26 @@ from dependency_parsers.nn.losses import lab_loss, arc_loss, edmonds_arc_loss
 import pytorch_lightning as pl
 
 class LitSupervisedLSTM(pl.LightningModule):
+    """PyTorch Lightning module that trains the Biaffine parser using a supervised technique.
+
+    Attributes:
+        lr (float): Learning rate of the optimiser. 
+        cle (Boolean): Whether the final prediction for the dependency tree is computed using 
+            Edmonds' Algorithm.
+        model (nn.Module): The Biaffine Parser to be trained.
+        arc_loss (function): Function computing the supervised loss of the arc scores.
+        lab_loss (function): Function computing the supervised loss of the label scores.
+        edmonds_arc_loss (function): Function computing the supervised loss of the arc
+            scores using Edmonds' Algorithm to generate the dependency tree.
+        loss (nn.CrossEntropyLoss): PyTorch function that implements the Cross Entropy.
+    """
     def __init__(self, embeddings, args):
+        """The Constructor method for the supervised parser.
+
+        Args:
+            embeddings (numpy.ndarray): Embeddings to be used in the Encoder
+            args (object): Arguments to set up the hyperparameters of the network.
+        """
         super().__init__()
 
         self.save_hyperparameters()
@@ -33,13 +52,41 @@ class LitSupervisedLSTM(pl.LightningModule):
         self.loss = nn.CrossEntropyLoss(ignore_index=-1)
     
     def configure_optimizers(self):
+        """Pytorch Lightning method that sets up the optimisation algorithm.
+
+        Returns:
+            torch.optim.Optimizer: Optimiser object for PyTorch.
+        """
         optimizer = optim.Adam(self.parameters(), lr=self.lr)
         return optimizer
     
     def forward(self, x):
+        """Defines the computation performed at every call of the model.
+        Args:
+            x (dict): A dictionary representing the input to the network. The dictionary contains:
+                sentence indexes, UPOS tag indexes, XPOS tag indexes, parent indexes, label indexes,
+                the length of the sentence
+
+        Returns:
+            tuple: The arc and label scores predicted by the model.
+        """
         return self.model(x)
         
     def training_step(self, train_batch, batch_idx):
+        """A PyTorch Lightning method that gets called on each batch used in a training epoch.
+
+        Args:
+            train_batch (dict): A dictionary representing the input to the network. The dictionary contains:
+                sentence indexes, UPOS tag indexes, XPOS tag indexes, parent indexes, label indexes,
+                the length of the sentence
+            batch_idx (int): The index of the current batch in the current epoch.
+
+        Returns:
+            dict: A dictionary that contains the computed loss for the current batch, the arc loss, the label
+                loss, the number of correctly identified edges in the trees and the total number of edges 
+                in the trees.
+        """
+
         parents = train_batch['parents']
         labels = train_batch['labels']
 
@@ -71,6 +118,12 @@ class LitSupervisedLSTM(pl.LightningModule):
         }
         
     def training_epoch_end(self, outputs):
+        """PyTorch Lightning method that gets called at the end of each training epoch.
+
+        Args:
+            outputs (Iterable): An iterable object containing the outputs of each training_step
+                call.
+        """
         correct = 0
         total = 0
         loss = 0.0
@@ -87,6 +140,17 @@ class LitSupervisedLSTM(pl.LightningModule):
         print('\nAccuracy after epoch end: {:3.3f} | Arc loss: {:3.3f} | Lab loss: {:3.3f}'.format(correct/total, arc_loss.detach(), lab_loss.detach()))
 
     def validation_step(self, val_batch, batch_idx):
+        """PyTorch Lightning method that gets called for each batch in a validation epoch.
+
+        Args:
+            val_batch (dict): A dictionary representing the input to the network. The dictionary contains:
+                sentence indexes, UPOS tag indexes, XPOS tag indexes, parent indexes, label indexes,
+                the length of the sentence
+            batch_idx (int): The index of the current batch in the current epoch.
+
+        Returns:
+            dict: Dictionary of statistics for the current batch.
+        """
         targets = val_batch['parents']
         labels = val_batch['labels']
         
@@ -111,6 +175,14 @@ class LitSupervisedLSTM(pl.LightningModule):
         return {'loss': total_loss, 'correct': num_correct, 'total': total, 'arc_loss':arc_loss.detach(), 'lab_loss': lab_loss.detach()}
 
     def validation_epoch_end(self, preds):
+        """PyTorch Lightning method that gets called at the end of a validation epoch.
+
+        Args:
+            preds (Iterable): An Iterable object with the statistics of each validation_step call.
+
+        Returns:
+            dict: Dictionary of overall statistics for the current epoch to be printed and logged.
+        """
         correct = 0
         total = 0
         loss = 0
@@ -129,6 +201,17 @@ class LitSupervisedLSTM(pl.LightningModule):
         return {'accuracy': correct / total, 'loss': loss/len(preds)}
 
     def test_step(self, test_batch, batch_idx):
+        """PyTorch Lightning method that gets called for each batch in the testing set.
+
+        Args:
+            test_batch (dict): A dictionary representing the input to the network. The dictionary contains:
+                sentence indexes, UPOS tag indexes, XPOS tag indexes, parent indexes, label indexes,
+                the length of the sentence
+            batch_idx (int): The index of the current batch in the current epoch.
+
+        Returns:
+            dict: Dictionary of statistics for the current batch.
+        """
         targets = test_batch['parents']
         labels = test_batch['labels']
         lengths = test_batch['lengths']
@@ -159,6 +242,14 @@ class LitSupervisedLSTM(pl.LightningModule):
 
     
     def test_epoch_end(self, preds):
+        """PyTorch Lightning method that gets called at the end of a validation epoch.
+
+        Args:
+            preds (Iterable): An Iterable object with the statistics of each validation_step call.
+
+        Returns:
+            dict: Dictionary of overall statistics for the current epoch to be printed and logged.
+        """
         return self.validation_epoch_end(preds)
 
 

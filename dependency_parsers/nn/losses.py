@@ -27,6 +27,7 @@ def arc_loss(S_arc, heads, loss):
     return loss(S_arc, heads)
 
 def edmonds_arc_loss(S_arc, lengths, heads, loss):
+    """Compute the loss for the arc predictions using the Edmonds algorithm."""
     S = torch.clone(S_arc.detach())
     batch_size = S.size(0)
     trees = []
@@ -43,6 +44,7 @@ def edmonds_arc_loss(S_arc, lengths, heads, loss):
     return batched, arc_loss(S_arc, heads, loss)
 
 def log_partition(scores, length):
+    """Computes Z, the partition functions, given a batch of scores for some dependency graphs."""
     batch, slen, slen_ = scores.shape
     assert slen == slen_
 
@@ -80,6 +82,7 @@ def log_partition(scores, length):
     return log_part
 
 def MTT_loss_1(parent_scores, lengths, targets):
+    """Computes the MTT loss, that uses the Z function, using a technique for numerical safety."""
     batch, maxlen, _ = parent_scores.shape
 
     # create masks to work with 
@@ -135,6 +138,7 @@ def MTT_loss_1(parent_scores, lengths, targets):
     return P.mean()
 
 def MTT_loss_2(scores, targets, lengths, Z):
+    """Computes the MTT loss, using the Z function, using a different technique for numerical safety."""
     # using scores with ROOT on diagonal
     lengths = lengths - torch.ones(len(lengths))
     targets = targets[:, 1:]
@@ -171,6 +175,7 @@ def MTT_loss_2(scores, targets, lengths, Z):
     return sums
 
 def MTT_loss_no_Z(arc_scores, lengths, targets):
+    """Computes the MTT loss ignoring Z (that is supposed to normalise the scores)."""
     batch, maxlen, _ = arc_scores.shape
     S = NonProjectiveDependencyCRF(arc_scores, lengths)
 
@@ -193,11 +198,13 @@ def MTT_loss_no_Z(arc_scores, lengths, targets):
     return P
 
 def GE_loss(scores, features, prior):
+    """Computes the Generalised Expectation Criteria equation using a given prior distribution."""
     X = torch.einsum('bij,bijf->bf', scores, features)
     Y = X - prior
     return 0.5 * (Y.unsqueeze(-2) @ Y.unsqueeze(-1)).squeeze(-1).squeeze(-1)
 
 def entropy_loss(marginals, scores):
+    """Computes an un-normalised version of the Shannon Entropy."""
     mask = scores == inf
     masked = scores.masked_fill(mask, 0.0)
     X = torch.einsum('bij,bij->b', marginals, masked).sum()

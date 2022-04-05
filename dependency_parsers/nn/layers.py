@@ -39,13 +39,14 @@ class Biaffine(nn.Module):
         Returns:
             float: Numerical value representing the score of the representation.
         """
-        
+
         head = head.unsqueeze(1)
         dep = dep.unsqueeze(1)
         scores = head @ self.W @ dep.transpose(-1,-2)
         return scores.squeeze(1)
 
     def reset_parameters(self):
+        """Sets the parameters of the biaffine matrix to an initial uniform random distribution."""
         nn.init.xavier_uniform_(self.W)
 
 class MLP(nn.Module):

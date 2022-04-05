@@ -3,8 +3,11 @@ from numpy import inf
 
 import torch.nn.functional as F
 
-# numerically safe log softmax
 def apply_log_softmax(scores, lengths):
+    """
+        Applies the LogSoftmax function to a set of scores while ensuring
+        numerical safety for padding scores.
+    """
     lengths = lengths - torch.ones(len(lengths))
 
     batch, maxlen, _ = scores.shape

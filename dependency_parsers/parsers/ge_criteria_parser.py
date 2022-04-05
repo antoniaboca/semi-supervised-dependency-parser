@@ -19,7 +19,35 @@ from stanza.models.common.chuliu_edmonds import chuliu_edmonds_one_root
 import pytorch_lightning as pl
 
 class LitSemiSupervisedLSTM(pl.LightningModule):
+    """PyTorch Lightning module that trains the Biaffine parser using the GE criteria technique.
+
+    Attributes:
+        lr (float): Learning rate of the optimiser.
+        cle (boolean): Whether the final prediction for the dependency tree is computed using 
+            Edmonds' Algorithm.
+        prior (torch.Tensor): The prior distribution of the top 20 POS tag edges
+        ge_only (boolean): Whether the parser should train using a split of labelled and unlabelled
+            data or using only the GE criteria on unlabelled data.
+        vocabulary (allennlp.data.Vocabulary): the vocabulary of the training set
+        order (dict): A dictionary having the top 20 edges as keys and their order in the top as values.
+        labelled_ratio (float): The ratio used in calculating the combined loss between supervised and 
+            unsupervised scores.
+        tag_type (str): Either 'xpos' or 'upos', the type of tag to be used in training.
+        model (nn.Module): the Biaffine Parser to train.
+        loss (nn.CrossEntropyLoss): the PyTorch implementation of the Cross Entropy loss function
+    """
     def __init__(self, embeddings, f_star, vocabulary, order, args):
+        """The Constructor method of the GE Criteria Parser.
+
+        Args:
+            embeddings (numpy.ndarray): Embeddings to be used in the Encoder
+            f_star (torch.Tensor): The prior distribution of the top 20 POS tag edges
+            vocabulary (allennlp.data.Vocabulary): the vocabulary of the training set
+            order (dict): A dictionary having the top 20 edges as keys and their order 
+                in the top as values.
+            args (object): Object containing arguments used to set up the hyperparameters
+                of the network.
+        """
         super().__init__()
         self.save_hyperparameters()
 
@@ -37,10 +65,25 @@ class LitSemiSupervisedLSTM(pl.LightningModule):
         self.loss = nn.CrossEntropyLoss(ignore_index=-1)
     
     def configure_optimizers(self):
+        """Pytorch Lightning method that sets up the optimisation algorithm.
+
+        Returns:
+            torch.optim.Optimizer: Optimiser object for PyTorch.
+        """
         optimizer = optim.Adam(self.parameters(), lr=self.lr)
         return optimizer
     
     def assert_features(self, batch):
+        """Function that asserts the feature function of each sentence has the correct format.
+
+        Args:
+            batch (dict): A dictionary representing the input to the network. The dictionary contains:
+                sentence indexes, UPOS tag indexes, XPOS tag indexes, parent indexes, label indexes,
+                the length of the sentence
+
+        Returns:
+            float: Ratio indicating how many edges in the labelled trees are covered by the top 20 edges.
+        """
         batch = batch['unlabelled']
         oracle_edges = 0
         total_edges = 0
@@ -75,9 +118,31 @@ class LitSemiSupervisedLSTM(pl.LightningModule):
         return (oracle_edges / total_edges)
 
     def forward(self, x):
+        """Defines the computation performed at every call of the model.
+        Args:
+            x (dict): A dictionary representing the input to the network. The dictionary contains:
+                sentence indexes, UPOS tag indexes, XPOS tag indexes, parent indexes, label indexes,
+                the length of the sentence
+
+        Returns:
+            tuple: The arc and label scores predicted by the model.
+        """
         return self.model(x)
         
     def training_step(self, batch, batch_idx):
+        """A PyTorch Lightning method that gets called on each batch used in a training epoch.
+
+        Args:
+            train_batch (dict): A dictionary representing the input to the network. The dictionary contains:
+                sentence indexes, UPOS tag indexes, XPOS tag indexes, parent indexes, label indexes,
+                the length of the sentence
+            batch_idx (int): The index of the current batch in the current epoch.
+
+        Returns:
+            dict: A dictionary that contains the computed loss for the current batch, the arc loss, the label
+                loss, the number of correctly identified edges in the trees and the total number of edges 
+                in the trees.
+        """
         edge_ratio = self.assert_features(batch)
         
         unlabelled = batch['unlabelled']
@@ -138,6 +203,12 @@ class LitSemiSupervisedLSTM(pl.LightningModule):
         }
         
     def training_epoch_end(self, outputs):
+        """PyTorch Lightning method that gets called at the end of each training epoch.
+
+        Args:
+            outputs (Iterable): An iterable object containing the outputs of each training_step
+                call.
+        """
         correct = 0
         total = 0
         loss = 0.0
@@ -161,6 +232,17 @@ class LitSemiSupervisedLSTM(pl.LightningModule):
         print('\nOracle target edges found: {:3.3f}% \n'.format(ratio / len(outputs)))
 
     def validation_step(self, val_batch, batch_idx):
+        """PyTorch Lightning method that gets called for each batch in a validation epoch.
+
+        Args:
+            val_batch (dict): A dictionary representing the input to the network. The dictionary contains:
+                sentence indexes, UPOS tag indexes, XPOS tag indexes, parent indexes, label indexes,
+                the length of the sentence
+            batch_idx (int): The index of the current batch in the current epoch.
+
+        Returns:
+            dict: Dictionary of statistics for the current batch.
+        """
         targets = val_batch['parents']
         labels = val_batch['labels']
         lengths = val_batch['lengths']
@@ -169,6 +251,8 @@ class LitSemiSupervisedLSTM(pl.LightningModule):
         batch, maxlen = targets.shape
         arc_scores, lab_scores = self(val_batch)
 
+
+        # COMPUTE THE UNLABELLED LOSS
         potentials = score_to_diagonal(arc_scores)
         log_potentials = apply_log_softmax(potentials, lengths)
         dist = NonProjectiveDependencyCRF(log_potentials, lengths - torch.ones(len(lengths)))
@@ -180,6 +264,8 @@ class LitSemiSupervisedLSTM(pl.LightningModule):
 
         diag_features = feature_to_diagonal(features.float())
         unlabelled_loss = GE_loss(dist.marginals, diag_features, self.prior).mean()
+        
+        # COMPUTE THE LABELLED LOSS
         labelled_loss = arc_loss(arc_scores, targets, self.loss)
         # lab_loss = self.lab_loss(lab_scores, targets, labels)
 
@@ -201,6 +287,14 @@ class LitSemiSupervisedLSTM(pl.LightningModule):
         return {'loss': total_loss, 'correct': num_correct, 'total': total, 'arc_loss': labelled_loss.detach()}
 
     def validation_epoch_end(self, preds):
+        """PyTorch Lightning method that gets called at the end of a validation epoch.
+
+        Args:
+            preds (Iterable): An Iterable object with the statistics of each validation_step call.
+
+        Returns:
+            dict: Dictionary of overall statistics for the current epoch to be printed and logged.
+        """
         correct = 0
         total = 0
         loss = 0
@@ -217,6 +311,17 @@ class LitSemiSupervisedLSTM(pl.LightningModule):
         return {'accuracy': correct / total, 'loss': loss/len(preds)}
 
     def test_step(self, test_batch, batch_idx):
+        """PyTorch Lightning method that gets called for each batch in the testing set.
+
+        Args:
+            test_batch (dict): A dictionary representing the input to the network. The dictionary contains:
+                sentence indexes, UPOS tag indexes, XPOS tag indexes, parent indexes, label indexes,
+                the length of the sentence
+            batch_idx (int): The index of the current batch in the current epoch.
+
+        Returns:
+            dict: Dictionary of statistics for the current batch.
+        """
         targets = test_batch['parents']
         labels = test_batch['labels']
         lengths = test_batch['lengths']
@@ -244,6 +349,14 @@ class LitSemiSupervisedLSTM(pl.LightningModule):
 
     
     def test_epoch_end(self, preds):
+        """PyTorch Lightning method that gets called at the end of a validation epoch.
+
+        Args:
+            preds (Iterable): An Iterable object with the statistics of each validation_step call.
+
+        Returns:
+            dict: Dictionary of overall statistics for the current epoch to be printed and logged.
+        """
         return self.validation_epoch_end(preds)
 
         

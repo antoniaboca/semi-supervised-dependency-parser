@@ -14,7 +14,24 @@ from torch_struct import NonProjectiveDependencyCRF
 import pytorch_lightning as pl
 
 class LitEntropyLSTM(pl.LightningModule):
+    """PyTorch Lightning module that trains the Biaffine parser using the Entropy technique.
+
+    Attributes:
+        lr (float): Learning rate of the optimiser. 
+        cle (boolean): Whether the final prediction for the dependency tree is computed using 
+            Edmonds' Algorithm.
+        model (nn.Module): The Biaffine Parser to be trained.
+        log_softmax (nn.LogSoftmax): The PyTorch implementation of the LogSoftmax function.
+        loss (nn.CrossEntropyLoss): PyTorch function that implements the Cross Entropy.
+        transfer (boolean): Whether this model should start with pe-trained weights.
+    """
     def __init__(self, embeddings, args):
+        """The Constructor method for the entropy-based parser.
+
+        Args:
+            embeddings (numpy.ndarray): Embeddings to be used in the Encoder
+            args (object): Arguments to set up the hyperparameters of the network.
+        """
         super().__init__()
 
         self.lr = args.lr
@@ -22,7 +39,6 @@ class LitEntropyLSTM(pl.LightningModule):
 
         self.transfer = args.transfer
         self.log_softmax = nn.LogSoftmax(dim=-1)
-        self.ge_only = args.ge_only
         self.cle = args.cle
 
         if args.transfer is True:
@@ -34,13 +50,41 @@ class LitEntropyLSTM(pl.LightningModule):
             self.model = BiaffineLSTM(embeddings, args)
 
     def configure_optimizers(self):
+        """Pytorch Lightning method that sets up the optimisation algorithm.
+
+        Returns:
+            torch.optim.Optimizer: Optimiser object for PyTorch.
+        """
         optimizer = optim.Adam(self.parameters(), lr=self.lr)
         return optimizer
     
     def forward(self, x):
+        """Defines the computation performed at every call of the model.
+        Args:
+            x (dict): A dictionary representing the input to the network. The dictionary contains:
+                sentence indexes, UPOS tag indexes, XPOS tag indexes, parent indexes, label indexes,
+                the length of the sentence
+
+        Returns:
+            tuple: The arc and label scores predicted by the model.
+        """
         return self.model(x)
         
     def training_step(self, batch, batch_idx):
+        """A PyTorch Lightning method that gets called on each batch used in a training epoch.
+
+        Args:
+            train_batch (dict): A dictionary representing the input to the network. The dictionary contains:
+                sentence indexes, UPOS tag indexes, XPOS tag indexes, parent indexes, label indexes,
+                the length of the sentence
+            batch_idx (int): The index of the current batch in the current epoch.
+
+        Returns:
+            dict: A dictionary that contains the computed loss for the current batch, the arc loss, the label
+                loss, the number of correctly identified edges in the trees and the total number of edges 
+                in the trees.
+        """
+
         unlabelled = batch['unlabelled']
         features = unlabelled['features']
 
@@ -113,6 +157,12 @@ class LitEntropyLSTM(pl.LightningModule):
         }
         
     def training_epoch_end(self, outputs):
+        """PyTorch Lightning method that gets called at the end of each training epoch.
+
+        Args:
+            outputs (Iterable): An iterable object containing the outputs of each training_step
+                call.
+        """
         correct = 0
         total = 0
         loss = 0.0
@@ -132,6 +182,17 @@ class LitEntropyLSTM(pl.LightningModule):
             print('\nAccuracy on labelled data: {:3.3f} | Unlabelled loss: {:3.3f} | Labelled loss: {:3.3f}'.format(correct/total, unlabelled, labelled))
 
     def validation_step(self, val_batch, batch_idx):
+        """PyTorch Lightning method that gets called for each batch in a validation epoch.
+
+        Args:
+            val_batch (dict): A dictionary representing the input to the network. The dictionary contains:
+                sentence indexes, UPOS tag indexes, XPOS tag indexes, parent indexes, label indexes,
+                the length of the sentence
+            batch_idx (int): The index of the current batch in the current epoch.
+
+        Returns:
+            dict: Dictionary of statistics for the current batch.
+        """
         targets = val_batch['parents']
         labels = val_batch['labels']
         
@@ -187,21 +248,6 @@ class LitEntropyLSTM(pl.LightningModule):
         num_correct += torch.count_nonzero((targets == parents) * (parents != -1))
         total += torch.count_nonzero((parents == parents) * (parents != -1))
         
-        """
-        arc_scores, lab_scores = self(val_batch)
-
-        arc_loss = self.arc_loss(arc_scores,targets)
-        lab_loss = self.lab_loss(lab_scores, targets, labels)
-
-        total_loss = arc_loss + lab_loss
-        num_correct = 0
-        total = 0
-        
-        parents = torch.argmax(arc_scores, dim=2)
-        num_correct += torch.count_nonzero((parents == targets) * (targets != -1))
-        total += torch.count_nonzero((targets == targets)* (targets != -1))
-        """
-
         self.log('validation_loss', total_loss, on_step=False, on_epoch=True, logger=True)
         self.log('validation_labelled_loss', labelled_loss.detach(), on_step=False, on_epoch=True, logger=True)
         self.log('validation_unlabelled_loss', unlabelled_loss.detach(), on_step=False, on_epoch=True, logger=True)
@@ -209,6 +255,14 @@ class LitEntropyLSTM(pl.LightningModule):
         return {'loss': total_loss, 'correct': num_correct, 'total': total, 'labelled_loss':labelled_loss.detach(), 'unlabelled_loss': unlabelled_loss.detach()}
 
     def validation_epoch_end(self, preds):
+        """PyTorch Lightning method that gets called at the end of a validation epoch.
+
+        Args:
+            preds (Iterable): An Iterable object with the statistics of each validation_step call.
+
+        Returns:
+            dict: Dictionary of overall statistics for the current epoch to be printed and logged.
+        """
         correct = 0
         total = 0
         loss = 0
@@ -232,6 +286,17 @@ class LitEntropyLSTM(pl.LightningModule):
         return {'accuracy': correct / total, 'loss': loss/len(preds)}
 
     def test_step(self, test_batch, batch_idx):
+        """PyTorch Lightning method that gets called for each batch in the testing set.
+
+        Args:
+            test_batch (dict): A dictionary representing the input to the network. The dictionary contains:
+                sentence indexes, UPOS tag indexes, XPOS tag indexes, parent indexes, label indexes,
+                the length of the sentence
+            batch_idx (int): The index of the current batch in the current epoch.
+
+        Returns:
+            dict: Dictionary of statistics for the current batch.
+        """
         targets = test_batch['parents']
         labels = test_batch['labels']
         lengths = test_batch['lengths']
@@ -259,6 +324,14 @@ class LitEntropyLSTM(pl.LightningModule):
 
     
     def test_epoch_end(self, preds):
+        """PyTorch Lightning method that gets called at the end of a validation epoch.
+
+        Args:
+            preds (Iterable): An Iterable object with the statistics of each validation_step call.
+
+        Returns:
+            dict: Dictionary of overall statistics for the current epoch to be printed and logged.
+        """
         correct = 0
         total = 0
         loss = 0.0
