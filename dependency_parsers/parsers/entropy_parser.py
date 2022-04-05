@@ -1,7 +1,5 @@
 import torchmetrics
 
-from cmath import inf
-
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -10,10 +8,7 @@ import torch.optim as optim
 from dependency_parsers.parsers.supervised_parser import LitSupervisedLSTM
 from dependency_parsers.nn.layers import BiaffineLSTM
 from dependency_parsers.nn.losses import entropy_loss, arc_loss, edmonds_arc_loss
-from dependency_parsers.nn.transform import feature_to_diagonal, score_to_diagonal, apply_log_softmax
-
-from torch.nn.utils.rnn import pad_sequence, pad_packed_sequence, pack_padded_sequence
-from torch.nn import Linear, LSTM
+from dependency_parsers.nn.transform import score_to_diagonal, apply_log_softmax
 
 from torch_struct import NonProjectiveDependencyCRF
 import pytorch_lightning as pl
