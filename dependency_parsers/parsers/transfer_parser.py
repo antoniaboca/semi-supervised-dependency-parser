@@ -14,7 +14,7 @@ from stanza.models.common.chuliu_edmonds import chuliu_edmonds_one_root
 
 import pytorch_lightning as pl
 
-from dependency_parsers.biaffine_parser.biaffine_lstm import LitLSTM
+from dependency_parsers.parsers.supervised_parser import LitLSTM
 from dependency_parsers.nn.transform import score_to_diagonal, apply_log_softmax, feature_to_diagonal
 from dependency_parsers.nn.losses import GE_loss, arc_loss, lab_loss, edmonds_arc_loss
 

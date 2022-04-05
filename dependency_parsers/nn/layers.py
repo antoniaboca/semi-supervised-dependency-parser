@@ -35,8 +35,8 @@ class MLP(nn.Module):
         self.dropout = nn.Dropout(linear_dropout)
 
         # Arc Linear Layer
-        self.linear_h = Linear(hidden_dim, out_dim)  # this is your g
-        self.linear_d = Linear(hidden_dim, out_dim) # this is your f
+        self.linear_h = Linear(hidden_dim, out_dim)
+        self.linear_d = Linear(hidden_dim, out_dim)
 
         self.score_h = Linear(out_dim, 1)
         self.score_d = Linear(out_dim, 1)

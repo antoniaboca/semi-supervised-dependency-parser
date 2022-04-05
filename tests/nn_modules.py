@@ -2,7 +2,7 @@ import unittest
 import torch
 import torch.nn as nn
 
-from dependency_parsers.biaffine_parser.biaffine_lstm import Biaffine
+from dependency_parsers.parsers.supervised_parser import Biaffine
 
 class BiaffineTestCase(unittest.TestCase):
     def test_batch_size_1_set_weights(self):

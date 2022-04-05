@@ -1,8 +1,8 @@
 from torch.nn.modules.loss import CrossEntropyLoss
 
-from dependency_parsers.semi_supervised_parser.entropy_lstm import LitEntropyLSTM
+from dependency_parsers.parsers.entropy_parser import LitEntropyLSTM
 from .lit_data_module import DataModule
-from .semi_supervised_parser.ge_criteria_lstm import LitSemiSupervisedLSTM
+from .parsers.ge_criteria_parser import LitSemiSupervisedLSTM
 
 import pytorch_lightning as pl
 

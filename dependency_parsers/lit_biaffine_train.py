@@ -1,5 +1,5 @@
 from .lit_data_module import DataModule
-from .biaffine_parser.biaffine_lstm import LitSupervisedLSTM
+from .parsers.supervised_parser import LitSupervisedLSTM
 
 import pytorch_lightning as pl
 

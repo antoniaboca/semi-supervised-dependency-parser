@@ -7,7 +7,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
 
-from dependency_parsers.biaffine_parser.biaffine_lstm import LitSupervisedLSTM
+from dependency_parsers.parsers.supervised_parser import LitSupervisedLSTM
 from dependency_parsers.nn.layers import BiaffineLSTM
 from dependency_parsers.nn.losses import entropy_loss, arc_loss, edmonds_arc_loss
 from dependency_parsers.nn.transform import feature_to_diagonal, score_to_diagonal, apply_log_softmax
