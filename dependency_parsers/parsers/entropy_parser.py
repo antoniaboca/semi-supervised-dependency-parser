@@ -115,13 +115,6 @@ class LitEntropyLSTM(pl.LightningModule):
 
         self.log('unlabelled_loss', unlabelled_loss.detach(), on_step=True, on_epoch=True, logger=True)
 
-        if self.ge_only:
-            self.log('training_loss', unlabelled_loss.detach(), on_step=True, on_epoch=True, logger=True)
-            return {
-                'loss': unlabelled_loss,
-                'unlabelled_loss': unlabelled_loss,
-            }
-
         # COMPUTE LOSS FOR LABELLED DATA
         labelled = batch['labelled']
         l_arc_scores, l_lab_scores = self(labelled)
@@ -170,16 +163,14 @@ class LitEntropyLSTM(pl.LightningModule):
         unlabelled = 0.0
         for output in outputs:
             loss += output['loss'] / len(outputs)
-
-            if not self.ge_only:
-                labelled += output['labelled_loss'] / len(outputs)
-                unlabelled += output['unlabelled_loss'] / len(outputs)
-                correct += output['correct']
-                total += output['total']
+            labelled += output['labelled_loss'] / len(outputs)
+            unlabelled += output['unlabelled_loss'] / len(outputs)
+            correct += output['correct']
+            total += output['total']
             
-        if not self.ge_only:
-            self.log('training_accuracy', correct/total, on_epoch=True, on_step=False, logger=True)
-            print('\nAccuracy on labelled data: {:3.3f} | Unlabelled loss: {:3.3f} | Labelled loss: {:3.3f}'.format(correct/total, unlabelled, labelled))
+        
+        self.log('training_accuracy', correct/total, on_epoch=True, on_step=False, logger=True)
+        print('\nAccuracy on labelled data: {:3.3f} | Unlabelled loss: {:3.3f} | Labelled loss: {:3.3f}'.format(correct/total, unlabelled, labelled))
 
     def validation_step(self, val_batch, batch_idx):
         """PyTorch Lightning method that gets called for each batch in a validation epoch.
@@ -305,7 +296,7 @@ class LitEntropyLSTM(pl.LightningModule):
         arc_scores, lab_scores = self(test_batch)
         
         if self.cle:
-            trees, labelled_loss = edmonds_arc_loss(arc_scores, lengths, targets)
+            trees, labelled_loss = edmonds_arc_loss(arc_scores, lengths, targets, self.loss)
         else:
             trees = torch.argmax(arc_scores, dim=2)
             labelled_loss = arc_loss(arc_scores, targets, self.loss)

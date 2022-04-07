@@ -27,7 +27,7 @@ def main():
     model.add_argument('--labelled-size', type=int, default=20000, help='Number of labelled sentences in the semi-supervised context')
     model.add_argument('--semi-labelled-batch', type=int, default=8, help='Number of labelled sentences in a batch for the semi supervised context')
     model.add_argument('--ge-only', action='store_true', help='Use only unlabelled data to train the semi-supervised parser')
-    model.add_argument('--oracle', action='store_true', help='Use oracle prior distribution for semi-supervised context')
+    model.add_argument('--oracle', action='store_true', help='Use oracle prior distribution for GE criteria context')
     model.add_argument('--name', type=str, default=None)
     model.add_argument('--labelled-loss-ratio', type=float, default=None)
     model.add_argument('--tag-type', type=str, choices=['xpos', 'upos'], default='xpos')
