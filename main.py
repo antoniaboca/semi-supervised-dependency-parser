@@ -52,7 +52,8 @@ def main():
     analysis.add_argument('--all-coverage', action='store_true', help='Determine all levels of coverage')
     analysis.add_argument('--set-coverage', type=float, default=None, help='Return number of tags necessary for given coverage')
     analysis.add_argument('--get-top-edges', type=int, default=None, help='Get the top number of POS tag edges.')
-    
+    analysis.add_argument('--get-coverage-all-edges', action='store_true')
+
     analysis.add_argument('--min-occurence', type=int, default=100)
     analysis.add_argument('--sentence-length', type=int, default=None)
     analysis.add_argument('--step', type=int, default=5)
@@ -79,7 +80,10 @@ def main():
     if args.mode == 'analysis':
         file, min_occurence, f, tag_type, sentence_length, step = args.file, args.min_occurence, args.set_coverage, args.tag_type, args.sentence_length, args.step
         top = args.get_top_edges
-
+        
+        if args.get_coverage_all_edges is True:
+            stats = TagCounter.tag_iteration_from_file(file, min_occurence, tag_type, sentence_length)
+            print(stats)
         if args.all_coverage is True:
             stats = TagCounter.get_statistics_from_file(file, min_occurence, tag_type, sentence_length, step)
             print(stats)

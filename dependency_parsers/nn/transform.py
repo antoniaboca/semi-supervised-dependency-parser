@@ -17,9 +17,10 @@ def apply_log_softmax(scores, lengths):
     # set the scores of arcs to padding tokens to a large negative number
     scores.masked_fill_(mask, -1e9)
         
-    aux = F.log_softmax(scores, dim=-1)
-    mask = aux <= -1e6
-    return aux.masked_fill(mask, -inf)
+    aux1 = F.log_softmax(torch.reshape(scores, (batch, maxlen * maxlen)), dim=-1)
+    aux2 = torch.reshape(aux1, (batch, maxlen, maxlen)) 
+    mask = aux2 <= -1e6
+    return aux2.masked_fill(mask, -inf)
 
 def feature_to_diagonal(features):
     """

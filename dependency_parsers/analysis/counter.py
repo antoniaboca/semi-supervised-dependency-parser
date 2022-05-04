@@ -266,7 +266,20 @@ class TagCounter():
                 ans = middle
                 right = middle - 1
         
-        return ans
+        return 
+    
+    def tag_iteration(self, min_occurence, tag_type):
+        results = {}
+        for no_edges in range(10, 310, 10):
+            dist, _ = self.get_top_edges(no_edges, min_occurence, tag_type)
+            f, _ = self.run_comparison(dist, tag_type)
+            results[no_edges] = f
+        return results
+    
+    def tag_iteration_from_file(file, min_occurence, tag_type, sentence_length=None):
+        counter = TagCounter(file)
+        counter.load(sentence_length)
+        return counter.tag_iteration(min_occurence, tag_type)
 
     def tag_search_from_file(file, f, min_occurence, tag_type, sentence_length=None):
         """Perform a tag search after loading a sentence dataset.
