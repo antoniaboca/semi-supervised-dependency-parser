@@ -2,7 +2,7 @@
 
 # Evaluation of a semi-supervised expectation-based dependency parser
 
-This project represents the code base for the dissertation of Antonia-Irina Boca, developed for the completion of the Computer Science Tripos Part II at the University of Cambridge.
+This project represents the code base of a dissertation developed for the completion of the Computer Science Tripos Part II at the University of Cambridge.
 
 The project implements a dependency parser following the architecture of Dozat & Manning (2017) that can be trained using three techniques:
 1. A supervised technique using cross entropy as a loss function
