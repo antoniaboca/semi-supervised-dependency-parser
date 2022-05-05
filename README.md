@@ -32,7 +32,7 @@ python3 ./main.py load --train-data <path/to/train/file> --validation-data <path
 ```
 This will create a `cache.pickle` file that is used by the parser for training. 
 
-**Low-resource simulation**
+###Low-resource simulation
 
 To create datasets for semi-supervised training, run:
 ```
@@ -53,6 +53,7 @@ To check all possible command line settings, run:
 ```
 python3 ./main.py --help
 ```
+Alternatively, you can check [this section](#full-list-of-command-line-arguments).
 
 ### Supervised training
 To run the model with default parameters in the supervised context:
@@ -70,4 +71,92 @@ python3 ./main.py train --semi --model [ge, entropy] --file <chosen/pickle/file>
 To get statistics on the distribution of Parts-of-Speech tags in the original `.conllu` file, run:
 ```
 python3 ./main.py analysis --file <path/to/test/data> --all-coverage --get-top-edges
+```
+
+## Full list of command line arguments
+When running `python3 ./main.py`, we have the following command line arguments (option parameters have default values):
+```
+positional arguments:
+{
+  load                 read and process conllu files
+  train                train a model
+  loop                 train 5 models on 5 dataset sizes
+  labelled_bucket      create low-resource files for the supervised context
+  unlabelled_bucket    create low-resource files for the semi-supervised
+                       context
+  analysis             run analysis on dataset of pos tag edges
+}
+  
+optional arguments:
+  -h, --help            show this help message and exit
+
+Model parameters:
+  --batch-size BATCH_SIZE
+                        batch size of the training process
+  --hidden-dim HIDDEN_DIM
+                        hidden dimension of the LSTM
+  --num-layers NUM_LAYERS
+                        number of layers in the LSTM
+  --arc-dim ARC_DIM     arc dimension of the biaffine layer
+  --lab-dim LAB_DIM     label dimension of the biaffine layer
+  --lstm-dropout LSTM_DROPOUT
+                        Dropout rate inside the LSTM
+  --epochs EPOCHS       Number of epochs to train on
+  --lr LR               Learning rate of the optimizer
+  --linear-dropout LINEAR_DROPOUT
+                        Add dropout to the linear layers
+  --file FILE           File containing formatted input data
+  --cle                 Use the chuliu-edmonds algorithm to create trees for
+                        testing phase
+  --semi                Train in the semi-supervised context
+  --labelled-size LABELLED_SIZE
+                        Number of labelled sentences in the semi-supervised
+                        context
+  --semi-labelled-batch SEMI_LABELLED_BATCH
+                        Number of labelled sentences in a batch for the semi
+                        supervised context
+  --ge-only             Use only unlabelled data to train the GE parser
+  --oracle              Use oracle distribution for GE criteria context
+  --name NAME
+                        name of model for pytorch logs
+  --labelled-loss-ratio LABELLED_LOSS_RATIO
+                        ratio to be used when computing split loss
+  --tag-type {xpos,upos}
+  --model {ge,entropy}
+
+Dataset size:
+  --train TRAIN         Max amount of sentences to load for training
+  --validation VALIDATION
+                        Maximum sentences to load for validation
+  --test TEST           Maximum sentences to test on
+  --embedding-dim EMBEDDING_DIM
+                        The dimension of the pretrained embeddings
+  --save-to-pickle-file SAVE_TO_PICKLE_FILE
+                        File where to save formatted input data
+
+Data loading arguments:
+  --train-data TRAIN_DATA
+                        Conllu file to load training sentences from
+  --validation-data VALIDATION_DATA
+                        Conllu file to load validation sentences from
+  --testing-data TESTING_DATA
+                        Conllu file to load testing sentences from
+  --embeddings EMBEDDINGS
+                        Text file to load embeddings from
+  --limit-sentence-size LIMIT_SENTENCE_SIZE
+                        Filter sentences based on how many tokens they have.
+
+Analysis arguments:
+  --all-coverage        Determine all levels of coverage
+  --set-coverage SET_COVERAGE
+                        Return number of tags necessary for given coverage
+  --get-top-edges GET_TOP_EDGES
+                        Get the top number of POS tag edges
+  --get-coverage-all-edges
+  --min-occurence MIN_OCCURENCE
+                        Minimum frequency of an edge to be taken into account
+  --sentence-length SENTENCE_LENGTH
+                        Maximum sentence length for analysis
+  --step STEP
+                        next coverage to check = prev coverage + step
 ```
